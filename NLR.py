@@ -24,14 +24,12 @@ class NonlinRegModel(nn.Module):
     def __init__(self):
         super(NonlinRegModel, self).__init__()
         self.layer1 = nn.Linear(1, 64)
-        self.layer2 = nn.Linear(64, 64)
-        self.layer3 = nn.Linear(64, 1)
+        self.layer2 = nn.Linear(64, 1)
         self.activation = nn.ReLU()
     
     def forward(self, x):
         x = self.activation(self.layer1(x))
-        x = self.activation(self.layer2(x))
-        x = self.layer3(x)
+        x = self.layer2(x)
         return x
 
 model = NonlinRegModel()
@@ -53,7 +51,7 @@ maes = []
 r2s = []
 
 #Train model
-num_epochs = 1500
+num_epochs = 2000
 for epoch in range(num_epochs):
     model.train()
     

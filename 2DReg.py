@@ -15,9 +15,9 @@ x_train = torch.tensor(x, dtype=torch.float32)
 y_train = torch.tensor(y, dtype=torch.float32).view(-1, 1)
 
 # Define model
-class SimpleNN(nn.Module):
+class Reg2D(nn.Module):
     def __init__(self):
-        super(SimpleNN, self).__init__()
+        super(Reg2D, self).__init__()
         self.hidden = nn.Linear(2, 32)
         self.output = nn.Linear(32, 1)
         self.relu = nn.ReLU()
@@ -28,7 +28,7 @@ class SimpleNN(nn.Module):
         return x
 
 # Initialize
-model = SimpleNN()
+model = Reg2D()
 crit = nn.MSELoss()
 optim = optim.Adam(model.parameters(), lr=0.01)
 loss_values = []
