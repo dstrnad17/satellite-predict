@@ -1,33 +1,45 @@
-
 import os
 import requests
+from bs4 import BeautifulSoup
+import numpy as np  # or import pandas as pd
 
-# URL of the ZIP file
-api_url = 'http://spdf.gsfc.nasa.gov/pub/data/aaa_special-purpose-datasets/empirical-magnetic-field-modeling-database-with-TS07D-coefficients/database/ascii/'
+# URL of the directory
+url = "https://spdf.gsfc.nasa.gov/pub/data/aaa_special-purpose-datasets/empirical-magnetic-field-modeling-database-with-TS07D-coefficients/database/ascii/"
 
-base_url = 'http://spdf.gsfc.nasa.gov/pub/data/aaa_special-purpose-datasets/empirical-magnetic-field-modeling-database-with-TS07D-coefficients/database/ascii/'
+# Function to download a file
+def download_file(url, dest_folder):
+    if not os.path.exists(dest_folder):
+        os.makedirs(dest_folder)
+    response = requests.get(url, stream=True)
+    response.raise_for_status()  # Ensure we notice bad responses
+    file_name = os.path.join(dest_folder, url.split("/")[-1])
+    with open(file_name, "wb") as file:
+        for chunk in response.iter_content(chunk_size=8192):
+            file.write(chunk)
+    print(f"Downloaded {file_name}")
+    return file_name
 
-save_dir = '/Users/dunnchadnstrnad/Documents/GitHub/2024phys798'
+# Function to load data from a .dat file
+def load_dat_file(filepath):
+    data = np.loadtxt(filepath)  # or use pandas: pd.read_csv(filepath, delim_whitespace=True, header=None)
+    return data
 
+# Get list of files
+response = requests.get(url)
+response.raise_for_status()  # Ensure we notice bad responses
+soup = BeautifulSoup(response.content, "html.parser")
+links = soup.find_all("a")
 
-os.makedirs(save_dir, exist_ok=True)
+# Filter out links for the files
+files = [link.get("href") for link in links if link.get("href").endswith((".txt", ".csv", ".dat"))]
 
-# Step 1: Get the list of files from the API
-response = requests.get(api_url)
-if response.status_code == 200:
-    file_list = response.json()  # Assuming the API returns a JSON array of filenames
+# Download and load each file
+for file in files:
+    file_url = url + file
+    downloaded_file_path = download_file(file_url, "downloaded_files")
+    if downloaded_file_path.endswith(".dat"):
+        data_array = load_dat_file(downloaded_file_path)
+        print(f"Data from {downloaded_file_path}:")
+        print(data_array)
 
-    for file_name in file_list:
-        file_url = base_url + file_name
-        # Step 2: Download each file
-        file_response = requests.get(file_url)
-        if file_response.status_code == 200:
-            save_path = os.path.join(save_dir, file_name)
-            # Step 3: Save each file
-            with open(save_path, 'wb') as file:
-                file.write(file_response.content)
-            print(f"Downloaded {save_path}")
-        else:
-            print(f"Failed to download {file_url}. Status code: {file_response.status_code}")
-else:
-    print(f"Failed to retrieve the directory listing from the API. Status code: {response.status_code}")
+print("All files downloaded and data loaded")

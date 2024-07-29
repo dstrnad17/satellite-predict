@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 #example data
 np.random.seed(0)
-X = np.random.rand(100, 3)  # 1000 samples, 3 features
+X = np.random.rand(100, 3)  # 100 samples, 3 features
 
 #target data
 weights = np.array([[1, 2, 3], [-1, -2, -3], [4, 5, -6]])
