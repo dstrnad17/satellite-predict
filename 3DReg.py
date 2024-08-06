@@ -6,10 +6,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
+from torch.utils.tensorboard import SummaryWriter
+from torchsummary import summary
+
+
 
 # Generate example 3D data
 np.random.seed(0)
-X = np.random.rand(500, 3)  # 1000 samples, 3 features
+X = np.random.rand(500, 3)  # 500 samples, 3 features
 y = X @ np.array([1, -2, 4]) + 0.5  # A linear combination plus some noise
 
 # Convert numpy arrays to PyTorch tensors
@@ -35,14 +39,32 @@ model1L = Reg3D1L()
 
 # Define loss function and optimizer
 crit = nn.MSELoss()
-optim1L = optim.Adam(model1L.parameters(), lr=0.01)
+optim1L = optim.Adam(model1L.parameters(), lr=0.003)
 loss_values1L = []
 
 # Early Stopping parameters
-patience = 25
+patience = 50
 best_loss1L = float('inf')
 best_epoch1L = 0
 epochs_no_improve1L = 0
+
+#Tensorboard
+writer = SummaryWriter('runs/3D_regression_1L')
+boardx = torch.randn(10, 3)
+writer.add_graph(model1L, boardx)
+
+#Torchsummary
+summary(model1L, input_size=(3,))
+
+#Parameters
+def save_model_parameters(model1L, filename):
+    with open(filename, 'w') as f:
+        for name, param in model1L.named_parameters():
+            f.write(f'{name}:\n')
+            f.write(f'{param.data}\n')
+            f.write(f'{"-"*40}\n')  #Separator
+            
+save_model_parameters(model1L, 'model1L_parameters.txt')
 
 # Train the model
 epochs = 5000
@@ -55,6 +77,8 @@ for epoch in range(epochs):
     optim1L.step()
     
     loss_values1L.append(loss.item())
+    
+    writer.add_scalar('Loss/1L', loss.item(), epoch)
     
     # Early Stopping check
     if loss.item() < best_loss1L:
@@ -69,9 +93,9 @@ for epoch in range(epochs):
         break
 
     if (epoch+1) % 50 == 0:
-        print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4f}')
+        print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4g}')
         
-print(f'Best epoch: {best_epoch1L+1}, Best loss: {best_loss1L:.4f}')
+print(f'Best epoch: {best_epoch1L+1}, Best loss: {best_loss1L:.4g}')
 
 # Evaluate the model
 model1L.eval()
@@ -89,8 +113,8 @@ class Reg3D2L(nn.Module):
     def __init__(self):
         super(Reg3D2L, self).__init__()
         self.fc1 = nn.Linear(3, 64)  # Input layer
-        self.fc2 = nn.Linear(64, 64) # Hidden layer
-        self.fc3 = nn.Linear(64, 1)  # Output layer
+        self.fc2 = nn.Linear(64, 32) # Hidden layer
+        self.fc3 = nn.Linear(32, 1)  # Output layer
 
     def forward(self, x):
         x = torch.relu(self.fc1(x))
@@ -103,12 +127,26 @@ model2L = Reg3D2L()
 
 # Define loss function and optimizer
 crit = nn.MSELoss()
-optim2L = optim.Adam(model2L.parameters(), lr=0.01)
+optim2L = optim.Adam(model2L.parameters(), lr=0.003)
 loss_values2L = []
 
 best_loss2L = float('inf')
 best_epoch2L = 0
 epochs_no_improve2L = 0
+
+writer2L = SummaryWriter('runs/3D_regression_2L')
+writer2L.add_graph(model2L, boardx)
+
+summary(model2L, input_size=(3,))
+
+def save_model2L_parameters(model2L, filename):
+    with open(filename, 'w') as f:
+        for name, param in model2L.named_parameters():
+            f.write(f'{name}:\n')
+            f.write(f'{param.data}\n')
+            f.write(f'{"-"*40}\n')  #Separator
+            
+save_model2L_parameters(model2L, 'model2L_parameters.txt')
 
 # Train the model
 for epoch in range(epochs):
@@ -120,6 +158,8 @@ for epoch in range(epochs):
     optim2L.step()
     
     loss_values2L.append(loss.item())
+    
+    writer2L.add_scalar('Loss/2L', loss.item(), epoch)
     
     # Early Stopping check
     if loss.item() < best_loss2L:
@@ -239,3 +279,6 @@ plt.title('Training Loss Over Epochs, 2 Hidden Layers')
 plt.legend()
 
 plt.savefig('3DRegLayers.png')
+
+writer.close()
+writer2L.close()
