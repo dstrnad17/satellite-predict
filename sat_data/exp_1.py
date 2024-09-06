@@ -193,8 +193,8 @@ def plot_reg_error(preds, real, time, title):
     plt.suptitle(title)
     plt.tight_layout(rect=[0, 0, 1, 0.97])
 
-    plt.savefig(f'{plot_directory}reg_error.png')
-    print(f"Regression error plot saved as {plot_directory}reg_error.png")
+    plt.savefig(f'{plot_directory}exp_1_reg_error.png')
+    print(f"Regression error plot saved as {plot_directory}exp_1_reg_error.png")
 
     plt.close()
 
