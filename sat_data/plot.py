@@ -43,7 +43,7 @@ for file_path in glob.glob(os.path.join(data_directory, '*.pkl')):
     dataframe['phi_b[rad]'] = np.arccos(dataframe['bz[nT]'] / dataframe['b[nT]'])
     print(f"Added polar coordinates for {file_name}")
     # Add datetime column to dataframe
-    dataframe['date'] = pd.to_datetime(dataframe[['year', 'month', 'day']])
+    dataframe['date'] = pd.to_datetime(dataframe[['year', 'month', 'day', 'hour', 'minute', 'second']])
 
     # Plot position data
     plot_data(
