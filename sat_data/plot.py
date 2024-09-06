@@ -1,12 +1,12 @@
-import pandas as pd
-import matplotlib.dates as dates
-import matplotlib.pyplot as plt
 import os
 import glob
-import numpy as np
-import datetime
-import matplotlib.dates as mdates
 
+import numpy as np
+import pandas as pd
+
+import matplotlib.dates as dates
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 #Define plot function
 def plot_data(dataframe, columns, labels, save_path, title, suptitle):

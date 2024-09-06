@@ -1,9 +1,12 @@
-import os, logging
+import os
+import logging
 import requests
-from bs4 import BeautifulSoup
-import pandas as pd
+
 from os import listdir
 from os.path import isfile, join, dirname, abspath
+
+import pandas as pd
+from bs4 import BeautifulSoup
 
 ## Download data ##
 
@@ -15,13 +18,14 @@ url = "https://spdf.gsfc.nasa.gov/pub/data/aaa_special-purpose-datasets/empirica
 # Function to download a file
 def download_file(url, dest_folder):
     os.makedirs(dest_folder, exist_ok=True)
+    print(f"Getting {url}")
     response = requests.get(url, stream=True)
     response.raise_for_status()  # Ensure we notice bad responses
     file_name = os.path.join(dest_folder, url.split("/")[-1])
     with open(file_name, "wb") as file:
         for chunk in response.iter_content(chunk_size=8192):
             file.write(chunk)
-    print(f"Downloaded {file_name}")
+    print(f"Saved: {file_name}")
 
 # Get list of files
 response = requests.get(url)
@@ -36,7 +40,7 @@ files = [link.get("href") for link in links if link.get("href").endswith((".txt"
 for file in files:
     file_url = url + file
     download_file(file_url, "data")
-    if all == False: 
+    if not all:
         print("File download complete, all=False")
         break
 
@@ -67,15 +71,17 @@ if not os.path.exists(mypath):
 # List all files in directory
 files = [f for f in listdir(mypath) if isfile(join(mypath, f)) and f.endswith(".dat")]
 
+xprint(f"Saving DataFrames for {len(files)} file(s)")
 # Extract column names from first file
 names = pd.DataFrame(pd.read_csv(mypath + files[0], nrows=0, delimiter=',')).columns
 
 # Process each file in directory
 for i, file in enumerate(files):
-    xprint(f"Processing file {i+1}/{len(files)}: {file}")
+    file = mypath + file
+    xprint(f"  Processing file {i+1}/{len(files)}: {file}")
     
     # Read the data, skip first row, whitespace as delimiter
-    data = pd.read_csv(mypath + file, skiprows=1, header=None, delimiter='\s+')
+    data = pd.read_csv(file, skiprows=1, header=None, delimiter=r'\s+')
     
     # Convert to DataFrame, assign column names
     df = pd.DataFrame(data)
@@ -85,6 +91,6 @@ for i, file in enumerate(files):
     pkl_filename = file.replace(".dat", ".pkl")
     df.to_pickle(join(mypath, pkl_filename))
     
-    xprint(f"Saved DataFrame to {pkl_filename}")
+    xprint(f"  Saved DataFrame to {pkl_filename}")
 
-xprint("All files pickled successfully")
+xprint("All files pickled and saved")
