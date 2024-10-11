@@ -92,7 +92,7 @@ def data_load(data_directory, file_pattern, position_cart, position_sph):
     return combined_df
 
 # Training and testing functions
-def train_and_test(num_inputs, num_boot_reps, removed_input=None):
+def train_and_test(combined_df, num_inputs, num_boot_reps, removed_input=None):
     results_dict = {}  # Dictionary to hold results for all repetitions
 
     for boot_rep in range(num_boot_reps):
@@ -220,8 +220,10 @@ for file_pattern, combined_df in dataframes.items():
             print(f"Training model with {input_to_remove} removed")
 
         # Train and evaluate the neural network model
-        results_dict = train_and_test(num_inputs=len(inputs), num_boot_reps=num_boot_reps, removed_input=None)
+        results_dict = train_and_test(combined_df, num_inputs=len(inputs), num_boot_reps=num_boot_reps, removed_input=None)
         removed_input = "None" if input_to_remove is None else input_to_remove
 
         # Store full results
         save_results(results_dict, file_pattern, removed_input, results_directory)
+
+    # Year to leave out in future
