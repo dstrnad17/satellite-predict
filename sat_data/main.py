@@ -12,10 +12,15 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 
-num_epochs = 5  # Number of epochs
-num_boot_reps = 10  # Number of bootstrap repetitions
+num_epochs = 1  # Number of epochs
+num_boot_reps = 2  # Number of bootstrap repetitions
+ny = 2 # Number of years to use
 
-file_pattern = ["goes8_*.pkl", "cluster1_*.pkl", "themise_*.pkl"]  # Desired satellites
+all = False
+if all:
+    file_pattern = ["cluster1_*.pkl", "goes8_*.pkl", "themise_*.pkl"]  # Desired satellites
+else:
+    file_pattern = ["cluster1_*.pkl"]
 
 # Define input and output column names
 inputs = ["r", "theta", "phi", "vsw", "ey", "imfbz", "nsw"]
@@ -32,7 +37,7 @@ elif torch.cuda.is_available():
     device = torch.device("cuda")   # Use CUDA on Windows/Linux
 else:
     device = torch.device("cpu")    # CPU Fallback
-print(device)
+print(f"Using device: {device}")
 
 # Define directories to save plots and results
 results_directory = './main_results/'
@@ -111,7 +116,7 @@ def train_and_test(combined_df=None, combined_dfs=None, **kwargs):
     # Perform leave-one-out if there are multiple datasets
     if combined_dfs:
         for i, test_df in enumerate(combined_dfs):
-            print(f"Leave-one-out: Using dataset {i + 1} as the test set")
+            print(f"  Leave-one-out: Using segment {i + 1}/{len(combined_dfs)} as the test set")
 
             # Train with all datasets except the current test set
             train_dfs = [df for j, df in enumerate(combined_dfs) if j != i]
@@ -120,7 +125,7 @@ def train_and_test(combined_df=None, combined_dfs=None, **kwargs):
             fold_results = {}
 
             for rep in range(num_boot_reps):
-                print(f"  rep {rep + 1} for leave-one-out fold {i + 1}")
+                print(f"    repetition {rep + 1}/{num_boot_reps}")
                 train_boot = train_df.sample(frac=0.8, random_state=rep)
                 rep_results = process_single_rep(train_boot, test_df, removed_input)
                 fold_results[f'rep_{rep + 1}'] = rep_results
@@ -149,6 +154,9 @@ def train_and_test(combined_df=None, combined_dfs=None, **kwargs):
 
 # Helper function to process a single training/testing repetition
 def process_single_rep(train_df, test_df, removed_input=None):
+
+    indent = "      "
+
     # Determine the current input features
     current_inputs = [inp for inp in inputs if inp != removed_input] if removed_input else inputs
     num_inputs = len(current_inputs)  # Calculate number of inputs based on current inputs
@@ -167,7 +175,9 @@ def process_single_rep(train_df, test_df, removed_input=None):
     model_multi = SatNet(num_inputs=num_inputs).to(device)
     opt_multi = torch.optim.Adam(model_multi.parameters(), lr=0.0006)
 
+    print(f"{indent}Training multi-output neural network")
     for epoch in range(num_epochs):
+        print(f"{indent}  Epoch {epoch + 1}/{num_epochs}", end='')
         total_loss = 0
         for data, target in DataLoader(TensorDataset(train_inputs, train_targets), batch_size=256, shuffle=True):
             opt_multi.zero_grad()
@@ -175,23 +185,28 @@ def process_single_rep(train_df, test_df, removed_input=None):
             loss.backward()
             opt_multi.step()
             total_loss += loss.item()
+        print(f" loss = {loss}")
 
     model_multi.eval()
     with torch.no_grad():
         nn_preds = model_multi(test_inputs).cpu().numpy()  # Multi-output NN predictions
 
     # Single-output neural networks for bx, by, and bz
+    print(f"{indent}Training single-output neural networks")
     nn_single_outputs = {}
     for i, component in enumerate(['bx', 'by', 'bz']):
         model_single = SatNet(num_inputs=len(current_inputs), single_output=True).to(device)
         opt_single = torch.optim.Adam(model_single.parameters(), lr=0.0006)
+        print(f"{indent}  Training {component} neural network")
 
         for epoch in range(num_epochs):
+            print(f"{indent}    Epoch {epoch + 1}/{num_epochs}", end='')
             for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, i:i+1]), batch_size=256, shuffle=True):
                 opt_single.zero_grad()
                 loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
                 loss.backward()
                 opt_single.step()
+            print(f" loss = {loss}")
 
         model_single.eval()
         with torch.no_grad():
@@ -239,7 +254,7 @@ def save_results(results_dict, file_pattern, removed_input, results_directory, m
 
     # Save to pickle file
     pd.to_pickle(results_dict, pkl_filepath)
-    print(f"Results saved to '{pkl_filepath}'")
+    print(f"  Saved '{pkl_filepath}'")
 
     # Optionally, save to a text file for additional analysis
     with open(dat_filepath, 'w') as f:
@@ -248,7 +263,7 @@ def save_results(results_dict, file_pattern, removed_input, results_directory, m
             df.to_string(f)
             f.write("\n\n")
     
-    print(f"Results saved to '{dat_filepath}'")
+    print(f"  Saved '{dat_filepath}'")
 
 ###### Main Execution Begins ######
 
@@ -258,14 +273,19 @@ kwargs = {
 
 # Iterate over each file pattern
 for pattern in file_pattern:
+    print("-"*50)
     print(f"Processing file pattern: {pattern}")
 
     # Load data using data_load function
     combined_dfs, combined_df = data_load(data_directory, pattern, position_cart, position_sph)
 
+    ny = min(ny, len(combined_dfs))  # Limit to first two datasets for testing
+    if len(combined_dfs) > 1:
+        combined_dfs = combined_dfs[0:ny]  # Limit to first two datasets for testing
+
     # Determine whether to use leave-one-out or full data based on the number of files
     use_leave_one_out = True if len(combined_dfs) > 1 else False
-    print(use_leave_one_out)
+    print(f"Leave-one-out mode: {use_leave_one_out}")
 
     # Loop to train with all parameters and each parameter removed
     for input_to_remove in [None] + inputs:  # None indicates all parameters
@@ -274,12 +294,11 @@ for pattern in file_pattern:
         if input_to_remove is None:
             print("Training model with no parameters removed")
         else:
-            print(f"Training model with {input_to_remove} removed")
+            print(f"Training model with '{input_to_remove}' removed")
 
         # Conditional training based on file count
         if use_leave_one_out is True:
             # Leave-one-out cross-validation case
-            print(f"Performing leave-one-out with {('no parameters removed' if input_to_remove is None else f'{input_to_remove} removed')}")
             results_dict_leave = train_and_test(
                 combined_df=None, 
                 combined_dfs=combined_dfs, 
@@ -287,7 +306,6 @@ for pattern in file_pattern:
             )
         else:
             # Full data case
-            print(f"Performing full data training with {('no parameters removed' if input_to_remove is None else f'{input_to_remove} removed')}")
             results_dict_full = train_and_test(
                 combined_df=combined_df, 
                 combined_dfs=None, 
