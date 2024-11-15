@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 
+# Specify the base directory containing the results
 base_directory = "./main_results/"
 if not os.path.exists(base_directory):
     os.makedirs(base_directory)
@@ -10,11 +11,11 @@ all = False
 
 # List desired satellites or patterns
 if all:
-    satellite_list = ["cluster1", "goes8", "themise"]  # Replace with actual sub-directory names
+    satellite_list = ["cluster1", "goes8", "themise"] 
 else:
-    satellite_list = ["cluster1"]  # Replace with actual sub-directory names
+    satellite_list = ["cluster1"] 
 
-# List of columns to calculate mean, std dev, and MSE
+# List of columns to calculate mean, std dev, and RMSE
 preds_nn3 = ['bx_nn3', 'by_nn3', 'bz_nn3']
 preds_lr = ['bx_lr', 'by_lr', 'bz_lr']
 preds_nn1 = ['bx_nn1', 'by_nn1', 'bz_nn1']
@@ -72,7 +73,7 @@ for directory_name in satellite_list:
                 avg_df = total_data.mean(axis=0)
                 std_df = total_data.std(axis=0)
 
-                # Calculate mean, std, mse after averaging the reps
+                # Calculate mean, std, rmse after averaging the reps
                 means_nn3 = avg_df[preds_nn3]
                 stds_nn3 = std_df[preds_nn3]
 
@@ -82,46 +83,46 @@ for directory_name in satellite_list:
                 means_lr = avg_df[preds_lr]
                 stds_lr = std_df[preds_lr]
 
-                # Calculate MSE for nn3
-                mse_nn3 = [
-                    np.mean(((total_data['bx_actual'] - total_data['bx_nn3']) ** 2)),
-                    np.mean(((total_data['by_actual'] - total_data['by_nn3']) ** 2)),
-                    np.mean(((total_data['bz_actual'] - total_data['bz_nn3']) ** 2))
+                # Calculate RMSE for nn3
+                rmse_nn3 = [
+                    np.sqrt(np.mean(((total_data['bx_actual'] - total_data['bx_nn3']) ** 2))),
+                    np.sqrt(np.mean(((total_data['by_actual'] - total_data['by_nn3']) ** 2))),
+                    np.sqrt(np.mean(((total_data['bz_actual'] - total_data['bz_nn3']) ** 2)))
                 ]
 
-                # Calculate MSE for nn1
-                mse_nn1 = [
-                    np.mean(((total_data['bx_actual'] - total_data['bx_nn1']) ** 2)),
-                    np.mean(((total_data['by_actual'] - total_data['by_nn1']) ** 2)),
-                    np.mean(((total_data['bz_actual'] - total_data['bz_nn1']) ** 2))
+                # Calculate RMSE for nn1
+                rmse_nn1 = [
+                    np.sqrt(np.mean(((total_data['bx_actual'] - total_data['bx_nn1']) ** 2))),
+                    np.sqrt(np.mean(((total_data['by_actual'] - total_data['by_nn1']) ** 2))),
+                    np.sqrt(np.mean(((total_data['bz_actual'] - total_data['bz_nn1']) ** 2)))
                 ]
 
-                # Calculate MSE for lr
-                mse_lr = [
-                    np.mean(((total_data['bx_actual'] - total_data['bx_lr']) ** 2)),
-                    np.mean(((total_data['by_actual'] - total_data['by_lr']) ** 2)),
-                    np.mean(((total_data['bz_actual'] - total_data['bz_lr']) ** 2))
+                # Calculate RMSE for lr
+                rmse_lr = [
+                    np.sqrt(np.mean(((total_data['bx_actual'] - total_data['bx_lr']) ** 2))),
+                    np.sqrt(np.mean(((total_data['by_actual'] - total_data['by_lr']) ** 2))),
+                    np.sqrt(np.mean(((total_data['bz_actual'] - total_data['bz_lr']) ** 2)))
                 ]
 
                 # Create a combined result for each model type
-                for model_type, means, stds, mse in zip(
+                for model_type, means, stds, rmse in zip(
                     ['nn3', 'nn1', 'lr'],
                     [means_nn3, means_nn1, means_lr],
                     [stds_nn3, stds_nn1, stds_lr],
-                    [mse_nn3, mse_nn1, mse_lr]
+                    [rmse_nn3, rmse_nn1, rmse_lr]
                 ):
                     result = {
                         'Removed Input': removed_input,
                         'Model': model_type,
                         'Mean_bx': means['bx_' + model_type],
                         'Std_bx': stds['bx_' + model_type],
-                        'MSE_bx': mse[0],
+                        'RMSE_bx': rmse[0],
                         'Mean_by': means['by_' + model_type],
                         'Std_by': stds['by_' + model_type],
-                        'MSE_by': mse[1],
+                        'RMSE_by': rmse[1],
                         'Mean_bz': means['bz_' + model_type],
                         'Std_bz': stds['bz_' + model_type],
-                        'MSE_bz': mse[2],
+                        'RMSE_bz': rmse[2],
                     }
 
                     # Append the result to the summary_data list

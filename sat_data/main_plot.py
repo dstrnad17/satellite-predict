@@ -114,14 +114,14 @@ for directory_name in satellite_list:
                     plt.xlabel('Time')
                     plt.ylabel('Bz')
 
-                    # Calculate MSE for the model type
-                    mse_bx = np.mean((total_data[f'bx_actual'] - total_data[f'bx_{model_type}']) ** 2)
-                    mse_by = np.mean((total_data[f'by_actual'] - total_data[f'by_{model_type}']) ** 2)
-                    mse_bz = np.mean((total_data[f'bz_actual'] - total_data[f'bz_{model_type}']) ** 2)
+                    # Calculate rmse for the model type
+                    rmse_bx = np.sqrt(np.mean((total_data[f'bx_actual'] - total_data[f'bx_{model_type}']) ** 2))
+                    rmse_by = np.sqrt(np.mean((total_data[f'by_actual'] - total_data[f'by_{model_type}']) ** 2))
+                    rmse_bz = np.sqrt(np.mean((total_data[f'bz_actual'] - total_data[f'bz_{model_type}']) ** 2))
 
-                    # Add the MSE to the plot as a text box
-                    mse_text = f'MSE bx: {mse_bx:.4f}\nMSE by: {mse_by:.4f}\nMSE bz: {mse_bz:.4f}'
-                    plt.gcf().text(0.85, 0.95, mse_text, fontsize=12, bbox=dict(facecolor='white', alpha=0.6, boxstyle='round,pad=0.5'))
+                    # Add the rmse to the plot as a text box
+                    rmse_text = f'RMSE bx: {rmse_bx:.4f}\nRMSE by: {rmse_by:.4f}\nRMSE bz: {rmse_bz:.4f}'
+                    plt.gcf().text(0.85, 0.95, rmse_text, fontsize=12, bbox=dict(facecolor='white', alpha=0.6, boxstyle='round,pad=0.5'))
                     plt.tight_layout()
                     
                     # Save the figure with a white background in the new subdirectory

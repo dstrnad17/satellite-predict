@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 
-num_epochs = 1  # Number of epochs
+num_epochs = 2  # Number of epochs
 num_boot_reps = 2  # Number of bootstrap repetitions
 ny = 2 # Number of years to use
 
@@ -29,6 +29,7 @@ position_cart = ["x[km]", "y[km]", "z[km]"]
 position_sph = ["r[km]", "theta[deg]", "phi[deg]"]
 
 data_directory = "./data/"
+
 
 # Device configuration
 if torch.backends.mps.is_available():
@@ -102,55 +103,39 @@ def data_load(data_directory, file_pattern, position_cart, position_sph):
 
         dataframes.append(df)
 
-    # Combine all DataFrames into a single DataFrame
-    combined_df = pd.concat(dataframes, ignore_index=True)
+    return dataframes
 
-    return dataframes, combined_df
-
-def train_and_test(combined_df=None, combined_dfs=None, **kwargs):
+def train_and_test(combined_dfs, file_pattern, **kwargs):
     num_boot_reps = kwargs.get('num_boot_reps', 1)
     removed_input = kwargs.get('removed_input', None)
-    file_pattern = kwargs.get('file_pattern', 'goes8_*.pkl')
     results_directory = kwargs.get('results_directory', './main_results/')
 
-    # Perform leave-one-out if there are multiple datasets
-    if combined_dfs:
-        for i, test_df in enumerate(combined_dfs):
-            print(f"  Leave-one-out: Using segment {i + 1}/{len(combined_dfs)} as the test set")
+    is_loo = len(combined_dfs) > 1  # Check if leave-one-out is needed
+    datasets = combined_dfs if is_loo else [combined_dfs[0]]
 
-            # Train with all datasets except the current test set
-            train_dfs = [df for j, df in enumerate(combined_dfs) if j != i]
-            train_df = pd.concat(train_dfs, ignore_index=True)
+    for i, test_data in enumerate(datasets):
+        if is_loo:
+            # For leave-one-out, concatenate training datasets excluding the current test dataset
+            print(f"  Leave-one-out: Using segment {i + 1}/{len(datasets)} as the test set")
+            train_data = pd.concat([df for j, df in enumerate(datasets) if j != i], ignore_index=True)
+            method_label = f"LOO_{i + 1}"
+        else:
+            # For full-data, use the full dataset
+            print(f"  Full data repetition {i + 1}/{num_boot_reps}")
+            train_data = datasets[0]
+            method_label = "full_data"
 
-            fold_results = {}
-
-            for rep in range(num_boot_reps):
-                print(f"    repetition {rep + 1}/{num_boot_reps}")
-                train_boot = train_df.sample(frac=0.8, random_state=rep)
-                rep_results = process_single_rep(train_boot, test_df, removed_input)
-                fold_results[f'rep_{rep + 1}'] = rep_results
-
-            # Save the accumulated results for this fold after all repetitions are complete
-            loo_label = f"LOO_{i + 1}"
-            save_results(fold_results, file_pattern, removed_input, results_directory, method=loo_label)
-
-    # Full-data case with bootstrapping (if only one dataset is available)
-    else:
-        full_data_results = {}
-
+        # Loop for bootstrapping and processing repetitions
+        results = {}
         for rep in range(num_boot_reps):
-            print(f"Performing full data repetition {rep + 1} with {('no parameters removed' if removed_input is None else f'{removed_input} removed')}")
-            
-            # Sample bootstrapped training and test data
-            train_df = combined_df.sample(frac=0.8, random_state=rep)
-            test_df = combined_df.drop(train_df.index)
-            
-            # Process the single rep and get results
-            rep_results = process_single_rep(train_df, test_df, removed_input)   
-            full_data_results[f'rep_{rep + 1}'] = rep_results
+            print(f"    Repetition {rep + 1}/{num_boot_reps}")
+            train_boot = train_data.sample(frac=0.8, random_state=rep)
+            test_data = datasets[i] if is_loo else datasets[0]  # Test data comes from the current fold
+            rep_results = process_single_rep(train_boot, test_data, removed_input)
+            results[f'rep_{rep + 1}'] = rep_results
 
-        # Save all repetitions of the full-data case in one file
-        save_results(full_data_results, file_pattern, removed_input, results_directory, method="full_data")
+        # Save the results after all repetitions are completed
+        save_results(results, file_pattern, removed_input, results_directory, method=method_label)
 
 # Helper function to process a single training/testing repetition
 def process_single_rep(train_df, test_df, removed_input=None):
@@ -213,6 +198,7 @@ def process_single_rep(train_df, test_df, removed_input=None):
             nn_single_outputs[component] = model_single(test_inputs).cpu().numpy()
 
     # Linear Regression as a baseline
+    print(f"{indent}Performing linear regresssion")
     lr_model = LinearRegression()
     lr_model.fit(train_df[current_inputs], train_df[field])
     lr_preds = lr_model.predict(test_df[current_inputs])
@@ -273,41 +259,33 @@ kwargs = {
 
 # Iterate over each file pattern
 for pattern in file_pattern:
-    print("-"*50)
+    print("-" * 50)
     print(f"Processing file pattern: {pattern}")
 
     # Load data using data_load function
-    combined_dfs, combined_df = data_load(data_directory, pattern, position_cart, position_sph)
+    combined_dfs = data_load(data_directory, pattern, position_cart, position_sph)
 
-    ny = min(ny, len(combined_dfs))  # Limit to first two datasets for testing
+    ny = min(ny, len(combined_dfs))  # Limit to ny for testing
     if len(combined_dfs) > 1:
-        combined_dfs = combined_dfs[0:ny]  # Limit to first two datasets for testing
+        combined_dfs = combined_dfs[0:ny]
 
-    # Determine whether to use leave-one-out or full data based on the number of files
-    use_leave_one_out = True if len(combined_dfs) > 1 else False
+    print(f"Loaded {len(combined_dfs)} datasets from pattern: {pattern}")
+
+    if not combined_dfs:
+        print(f"No datasets found for pattern: {pattern}. Skipping.")
+        continue
+
+    # Determine whether to use leave-one-out or full data
+    use_leave_one_out = len(combined_dfs) > 1
     print(f"Leave-one-out mode: {use_leave_one_out}")
 
-    # Loop to train with all parameters and each parameter removed
-    for input_to_remove in [None] + inputs:  # None indicates all parameters
-        kwargs['removed_input'] = input_to_remove  # Update dict with removed parameter
+    # Train models with all parameters and each parameter removed
+    for input_to_remove in [None] + inputs:
+        kwargs['removed_input'] = input_to_remove
 
         if input_to_remove is None:
             print("Training model with no parameters removed")
         else:
             print(f"Training model with '{input_to_remove}' removed")
 
-        # Conditional training based on file count
-        if use_leave_one_out is True:
-            # Leave-one-out cross-validation case
-            results_dict_leave = train_and_test(
-                combined_df=None, 
-                combined_dfs=combined_dfs, 
-                **kwargs
-            )
-        else:
-            # Full data case
-            results_dict_full = train_and_test(
-                combined_df=combined_df, 
-                combined_dfs=None, 
-                **kwargs
-            )
+        train_and_test(combined_dfs=combined_dfs, file_pattern=pattern, **kwargs)

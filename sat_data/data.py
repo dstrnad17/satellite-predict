@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 
 ## Download data ##
 
-all = False
+all = True
 
 # URL of the directory
 url = "https://spdf.gsfc.nasa.gov/pub/data/aaa_special-purpose-datasets/empirical-magnetic-field-modeling-database-with-TS07D-coefficients/database/ascii/"
