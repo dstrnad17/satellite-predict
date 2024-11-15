@@ -38,6 +38,9 @@ files = [link.get("href") for link in links if link.get("href").endswith((".txt"
 
 # Download each file
 for file in files:
+    if not all and not file.startswith("cluster1"):
+        # Only d/l cluster1 files
+        continue
     file_url = url + file
     download_file(file_url, "data")
     if not all:
