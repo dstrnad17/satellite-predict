@@ -1,6 +1,6 @@
 import os
 import glob
-import datetime
+import time
 
 import torch
 import torch.nn as nn
@@ -13,15 +13,19 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 
-num_epochs = 2  # Number of epochs
+num_epochs = 20  # Number of epochs
 num_boot_reps = 2  # Number of bootstrap repetitions
 ny = None # Number of years to use; Use `None` for all years
 
+parallel = True
+batch_size = 256
+start = time.time()
+
 all = False
 if all:
-    file_pattern = ["cluster1_*.pkl", "goes8_*.pkl", "themise_*.pkl"]  # Desired satellites
+    file_patterns = ["cluster1_*.pkl", "goes8_*.pkl", "themise_*.pkl"]  # Desired satellites
 else:
-    file_pattern = ["cluster1_*.pkl"]
+    file_patterns = ["cluster1_*.pkl"]
 
 # Define input and output column names
 inputs = ["r", "theta", "phi", "vsw", "ey", "imfbz", "nsw"]
@@ -31,7 +35,6 @@ position_sph = ["r[km]", "theta[deg]", "phi[deg]"]
 
 data_directory = "./data/"
 
-
 # Device configuration
 if torch.backends.mps.is_available():
     device = torch.device("mps")  # Use MPS on Mac
@@ -39,6 +42,7 @@ elif torch.cuda.is_available():
     device = torch.device("cuda")   # Use CUDA on Windows/Linux
 else:
     device = torch.device("cpu")    # CPU Fallback
+device = torch.device("cpu")
 print(f"Using device: {device}")
 
 # Define directories to save plots and results
@@ -117,7 +121,7 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
     for i, test_data in enumerate(datasets):
         if is_loo:
             # For leave-one-out, concatenate training datasets excluding the current test dataset
-            print(f"  {datetime.datetime.now()}")
+            print(f"  {time.time()-start}")
             print(f"  Leave-one-out: Using segment {i + 1}/{len(datasets)} as the test set")
             train_data = pd.concat([df for j, df in enumerate(datasets) if j != i], ignore_index=True)
             method_label = f"LOO_{i + 1}"
@@ -130,7 +134,7 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
         # Loop for bootstrapping and processing repetitions
         results = {}
         for rep in range(num_boot_reps):
-            print(f"    Repetition {rep + 1}/{num_boot_reps}")
+            print(f"    Repetition {rep + 1}/{num_boot_reps} started at {time.time()-start}")
             train_boot = train_data.sample(frac=0.8, random_state=rep)
             test_data = datasets[i] if is_loo else datasets[0]  # Test data comes from the current fold
             rep_results = process_single_rep(train_boot, test_data, removed_input)
@@ -166,7 +170,7 @@ def process_single_rep(train_df, test_df, removed_input=None):
     for epoch in range(num_epochs):
         print(f"{indent}  Epoch {epoch + 1}/{num_epochs}", end='')
         total_loss = 0
-        for data, target in DataLoader(TensorDataset(train_inputs, train_targets), batch_size=256, shuffle=True):
+        for data, target in DataLoader(TensorDataset(train_inputs, train_targets), batch_size=batch_size, shuffle=True):
             opt_multi.zero_grad()
             loss = nn.MSELoss()(model_multi(data), target)
             loss.backward()
@@ -188,7 +192,7 @@ def process_single_rep(train_df, test_df, removed_input=None):
 
         for epoch in range(num_epochs):
             print(f"{indent}    Epoch {epoch + 1}/{num_epochs}", end='')
-            for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, i:i+1]), batch_size=256, shuffle=True):
+            for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, i:i+1]), batch_size=batch_size, shuffle=True):
                 opt_single.zero_grad()
                 loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
                 loss.backward()
@@ -259,36 +263,54 @@ kwargs = {
     'num_boot_reps': num_boot_reps,
 }
 
-# Iterate over each file pattern
-for pattern in file_pattern:
+def job(job_input):
+    file_pattern = job_input[0]
+    input_to_remove = job_input[1]
+
     print("-" * 50)
-    print(f"Processing file pattern: {pattern}")
+    print(f"Processing file pattern: {file_pattern}")
+    print(data_directory)
 
     # Load data using data_load function
-    combined_dfs = data_load(data_directory, pattern, position_cart, position_sph)
+    combined_dfs = data_load(data_directory, file_pattern, position_cart, position_sph)
 
     if ny:
-        ny = min(ny, len(combined_dfs))  # Limit to ny for testing
+        ny_min = min(ny, len(combined_dfs))  # Limit to ny for testing
         if len(combined_dfs) > 1:
-            combined_dfs = combined_dfs[0:ny]
+            combined_dfs = combined_dfs[0:ny_min]
 
-    print(f"Loaded {len(combined_dfs)} datasets from pattern: {pattern}")
+    print(f"Loaded {len(combined_dfs)} datasets from pattern: {file_pattern}")
 
     if not combined_dfs:
-        print(f"No datasets found for pattern: {pattern}. Skipping.")
-        continue
+        print(f"No datasets found for pattern: {file_pattern}. Skipping.")
+        return
 
     # Determine whether to use leave-one-out or full data
     use_leave_one_out = len(combined_dfs) > 1
     print(f"Leave-one-out mode: {use_leave_one_out}")
 
-    # Train models with all parameters and each parameter removed
-    for input_to_remove in [None] + inputs:
-        kwargs['removed_input'] = input_to_remove
-        print(datetime.datetime.now())
-        if input_to_remove is None:
-            print("Training model with no parameters removed")
-        else:
-            print(f"Training model with '{input_to_remove}' removed")
+    kwargs['removed_input'] = input_to_remove
+    if input_to_remove is None:
+        print("Training model with no parameters removed")
+    else:
+        print(f"Training model with '{input_to_remove}' removed")
 
-        train_and_test(combined_dfs=combined_dfs, file_pattern=pattern, **kwargs)
+    train_and_test(combined_dfs=combined_dfs, file_pattern=file_pattern, **kwargs)
+
+
+job_inputs = []
+for file_pattern in file_patterns:
+    for input_to_remove in [None] + inputs:
+        job_inputs.append([file_pattern, input_to_remove])
+
+
+if __name__ == '__main__':
+    if parallel:
+        import multiprocessing
+        ncpu = multiprocessing.cpu_count()
+        print(f"# cpus: {ncpu}")
+        p = multiprocessing.Pool(ncpu - 1 if ncpu > 1 else 1)
+        p.map(job, job_inputs)
+    else:
+        for job_input in job_inputs:
+            job(job_input)
