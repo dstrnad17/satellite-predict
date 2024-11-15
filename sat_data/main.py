@@ -1,5 +1,6 @@
 import os
 import glob
+import datetime
 
 import torch
 import torch.nn as nn
@@ -14,7 +15,7 @@ from sklearn.metrics import mean_squared_error
 
 num_epochs = 2  # Number of epochs
 num_boot_reps = 2  # Number of bootstrap repetitions
-ny = 2 # Number of years to use
+ny = None # Number of years to use; Use `None` for all years
 
 all = False
 if all:
@@ -116,6 +117,7 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
     for i, test_data in enumerate(datasets):
         if is_loo:
             # For leave-one-out, concatenate training datasets excluding the current test dataset
+            print(f"  {datetime.datetime.now()}")
             print(f"  Leave-one-out: Using segment {i + 1}/{len(datasets)} as the test set")
             train_data = pd.concat([df for j, df in enumerate(datasets) if j != i], ignore_index=True)
             method_label = f"LOO_{i + 1}"
@@ -265,9 +267,10 @@ for pattern in file_pattern:
     # Load data using data_load function
     combined_dfs = data_load(data_directory, pattern, position_cart, position_sph)
 
-    ny = min(ny, len(combined_dfs))  # Limit to ny for testing
-    if len(combined_dfs) > 1:
-        combined_dfs = combined_dfs[0:ny]
+    if ny:
+        ny = min(ny, len(combined_dfs))  # Limit to ny for testing
+        if len(combined_dfs) > 1:
+            combined_dfs = combined_dfs[0:ny]
 
     print(f"Loaded {len(combined_dfs)} datasets from pattern: {pattern}")
 
@@ -282,7 +285,7 @@ for pattern in file_pattern:
     # Train models with all parameters and each parameter removed
     for input_to_remove in [None] + inputs:
         kwargs['removed_input'] = input_to_remove
-
+        print(datetime.datetime.now())
         if input_to_remove is None:
             print("Training model with no parameters removed")
         else:
