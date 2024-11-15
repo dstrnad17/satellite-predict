@@ -8,7 +8,7 @@ if not os.path.exists(base_directory):
     os.makedirs(base_directory)
 
 # List desired satellites or patterns
-satellite_list = ["goes8", "cluster1", "themise"]  # Replace with actual sub-directory names
+satellite_list = ["goes8", "cluster1", "themise"]
 
 # List of columns to calculate mean, std dev, and MSE
 preds_nn3 = ['bx_nn3', 'by_nn3', 'bz_nn3']
