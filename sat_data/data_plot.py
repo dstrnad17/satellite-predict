@@ -4,6 +4,14 @@ import glob
 import numpy as np
 import pandas as pd
 
+# name, symbol, unit = column_info('x[km]') => 'x', 'θ', 'km'
+def column_info(column_name):
+    name = column_name.split('[')[0]
+    unit = column_name.split('[')[1].split(']')[1]
+    symbols = {'x': 'x', 'y': 'y', 'z': 'z', 'bx': 'B_x', 'by': 'B_y', 'bz': 'B_z'}
+
+    return name, symbols[name], unit
+
 import matplotlib.dates as dates
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates

@@ -13,13 +13,15 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 
-num_epochs = 20  # Number of epochs
-num_boot_reps = 2  # Number of bootstrap repetitions
-ny = None # Number of years to use; Use `None` for all years
-
-parallel = True
-batch_size = 256
+data_directory = "./data/"
 start = time.time()
+
+ny = 1              # Number of years to use; Use `None` for all years
+num_epochs = 2      # Number of epochs
+num_boot_reps = 2   # Number of bootstrap repetitions
+
+parallel = False
+batch_size = 256
 
 all = False
 if all:
@@ -27,13 +29,17 @@ if all:
 else:
     file_patterns = ["cluster1_*.pkl"]
 
+all_inputs_only = True
 # Define input and output column names
-inputs = ["r", "theta", "phi", "vsw", "ey", "imfbz", "nsw"]
-field = ["bx[nT]", "by[nT]", "bz[nT]"]
-position_cart = ["x[km]", "y[km]", "z[km]"]
+#inputs = ["r[km]","theta[deg]", "phi[deg]", "vsw[km/s]", "ey[mV/m]", "imfbz[nT]", "nsw[1/cm^3]"]
+inputs = ["theta[deg]"]
+outputs = ["bx[nT]", "by[nT]", "bz[nT]"]
+
+# Labels for derived columns
 position_sph = ["r[km]", "theta[deg]", "phi[deg]"]
 
-data_directory = "./data/"
+position_cart = ["x[km]", "y[km]", "z[km]"]
+
 
 # Device configuration
 if torch.backends.mps.is_available():
@@ -91,16 +97,6 @@ def data_load(data_directory, file_pattern, position_cart, position_sph):
         # Add spherical coordinates to the DataFrame
         for i, col in enumerate(position_sph):
             df[col] = spherical[:, i]
-        
-        df.rename(columns={
-            "r[km]": "r",
-            "theta[deg]": "theta",
-            "phi[deg]": "phi",
-            "vsw[km/s]": "vsw",
-            "ey[mV/m]": "ey",
-            "imfbz[nT]": "imfbz",
-            "nsw[1/cm^3]": "nsw"
-        }, inplace=True)
 
         df['datetime'] = pd.to_datetime(
             df[['year', 'month', 'day', 'hour', 'minute', 'second']]
@@ -158,9 +154,9 @@ def process_single_rep(train_df, test_df, removed_input=None):
 
     # Convert data to tensors
     train_inputs = torch.tensor(train_df[current_inputs].values, dtype=torch.float32).to(device)
-    train_targets = torch.tensor(train_df[field].values, dtype=torch.float32).to(device)
+    train_targets = torch.tensor(train_df[outputs].values, dtype=torch.float32).to(device)
     test_inputs = torch.tensor(test_df[current_inputs].values, dtype=torch.float32).to(device)
-    test_targets = torch.tensor(test_df[field].values, dtype=torch.float32).to(device)
+    test_targets = torch.tensor(test_df[outputs].values, dtype=torch.float32).to(device)
 
     # Neural network training with multi-output
     model_multi = SatNet(num_inputs=num_inputs).to(device)
@@ -206,7 +202,10 @@ def process_single_rep(train_df, test_df, removed_input=None):
     # Linear Regression as a baseline
     print(f"{indent}Performing linear regresssion")
     lr_model = LinearRegression()
-    lr_model.fit(train_df[current_inputs], train_df[field])
+    #import pdb; pdb.set_trace()
+    print(train_df[current_inputs])
+    print(train_df[outputs])
+    lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
 
     # Collect results in a DataFrame
@@ -268,8 +267,7 @@ def job(job_input):
     input_to_remove = job_input[1]
 
     print("-" * 50)
-    print(f"Processing file pattern: {file_pattern}")
-    print(data_directory)
+    print(f"Processing file pattern: {file_pattern} in {data_directory}")
 
     # Load data using data_load function
     combined_dfs = data_load(data_directory, file_pattern, position_cart, position_sph)

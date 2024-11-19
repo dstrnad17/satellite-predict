@@ -61,6 +61,7 @@ for directory_name in satellite_list:
 
                     # Iterate through each DataFrame in the .pkl file
                     for key, df in df_dict.items():
+                        print(key)
                         rep_dataframes.append(df)
 
                     # Concatenate each rep df
@@ -123,7 +124,7 @@ for directory_name in satellite_list:
                     rmse_text = f'RMSE bx: {rmse_bx:.4f}\nRMSE by: {rmse_by:.4f}\nRMSE bz: {rmse_bz:.4f}'
                     plt.gcf().text(0.85, 0.95, rmse_text, fontsize=12, bbox=dict(facecolor='white', alpha=0.6, boxstyle='round,pad=0.5'))
                     plt.tight_layout()
-                    
+
                     # Save the figure with a white background in the new subdirectory
                     plt.savefig(os.path.join(plots_dir, f"{directory_name}_{removed_input}_{model_type}_time_error.png"), transparent=False)
                     plt.close()

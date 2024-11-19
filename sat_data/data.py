@@ -65,7 +65,7 @@ def xprint(msg):
 
 # Use script's directory
 script_dir = dirname(abspath(__file__))
-mypath = join(script_dir, "data/")
+mypath = join(script_dir, "data")
 
 # Ensure directory exists
 if not os.path.exists(mypath):
