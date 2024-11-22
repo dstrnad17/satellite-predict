@@ -1,3 +1,10 @@
+
+# Create a model using all inputs
+all_input_model = True/False
+# For each leave_out variable, create model with all inputs except the leave_out variable
+leave_outs = ["r[km]", "theta[deg]"] # or None
+inputs = ["r[km]","theta[deg]", "phi[deg]", "vsw[km/s]", "ey[mV/m]", "imfbz[nT]", "nsw[1/cm^3]"]
+
 import os
 import glob
 import time
@@ -108,6 +115,7 @@ def data_load(data_directory, file_pattern, position_cart, position_sph):
 
 def train_and_test(combined_dfs, file_pattern, **kwargs):
     num_boot_reps = kwargs.get('num_boot_reps', 1)
+    inputs = kwargs.get('inputs', None)
     removed_input = kwargs.get('removed_input', None)
     results_directory = kwargs.get('results_directory', './main_results/')
 
@@ -133,14 +141,14 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
             print(f"    Repetition {rep + 1}/{num_boot_reps} started at {time.time()-start}")
             train_boot = train_data.sample(frac=0.8, random_state=rep)
             test_data = datasets[i] if is_loo else datasets[0]  # Test data comes from the current fold
-            rep_results = process_single_rep(train_boot, test_data, removed_input)
+            rep_results = process_single_rep(train_boot, test_data, inputs, removed_input=removed_input)
             results[f'rep_{rep + 1}'] = rep_results
 
         # Save the results after all repetitions are completed
         save_results(results, file_pattern, removed_input, results_directory, method=method_label)
 
 # Helper function to process a single training/testing repetition
-def process_single_rep(train_df, test_df, removed_input=None):
+def process_single_rep(train_df, test_df, inputs, removed_input=None):
 
     indent = "      "
 
@@ -208,6 +216,10 @@ def process_single_rep(train_df, test_df, removed_input=None):
     lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
 
+    model_type = ['nn3', 'nn1', 'lr']
+    outputs
+    # Loop over
+
     # Collect results in a DataFrame
     rep_results = pd.DataFrame({
         'timestamp': test_df['datetime'].values,
@@ -262,10 +274,9 @@ kwargs = {
     'num_boot_reps': num_boot_reps,
 }
 
-def job(job_input):
-    file_pattern = job_input[0]
-    input_to_remove = job_input[1]
+def job(**kwargs):
 
+    file_pattern = kwargs['file_pattern']
     print("-" * 50)
     print(f"Processing file pattern: {file_pattern} in {data_directory}")
 
@@ -283,24 +294,30 @@ def job(job_input):
         print(f"No datasets found for pattern: {file_pattern}. Skipping.")
         return
 
-    # Determine whether to use leave-one-out or full data
-    use_leave_one_out = len(combined_dfs) > 1
-    print(f"Leave-one-out mode: {use_leave_one_out}")
-
-    kwargs['removed_input'] = input_to_remove
-    if input_to_remove is None:
+    if kwargs['removed_input'] is None:
         print("Training model with no parameters removed")
     else:
-        print(f"Training model with '{input_to_remove}' removed")
+        print(f"Training model with '{kwargs['removed_input']}' removed")
 
-    train_and_test(combined_dfs=combined_dfs, file_pattern=file_pattern, **kwargs)
+    train_and_test(combined_dfs=combined_dfs, **kwargs)
+
+
+if leave_outs is None:
+    leave_outs = []
+for leave_out in leave_outs:
+    if leave_out not in inputs:
+        raise ValueError(f"leave_out variable = '{leave_out}' not in inputs = {inputs}")
 
 
 job_inputs = []
 for file_pattern in file_patterns:
-    for input_to_remove in [None] + inputs:
-        job_inputs.append([file_pattern, input_to_remove])
-
+    kwargs = {"file_pattern": file_pattern, "inputs": inputs}
+    if all_input_model:
+        kwargs['removed_input'] = None
+        job_inputs.append(**kwargs)
+    for leave_out in leave_outs:
+        kwargs['removed_input'] = leave_out
+        job_inputs.append(**kwargs)
 
 if __name__ == '__main__':
     if parallel:
