@@ -1,5 +1,6 @@
 import os
 import glob
+import time
 
 import torch
 import torch.nn as nn
@@ -12,24 +13,34 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 
-num_epochs = 2  # Number of epochs
-num_boot_reps = 2  # Number of bootstrap repetitions
-ny = 2 # Number of years to use
+data_directory = "./data/"
+start = time.time()
+
+ny = 1           # Number of years to use; Use `None` for all years
+num_epochs = 2      # Number of epochs
+num_boot_reps = 2   # Number of bootstrap repetitions
+
+parallel = False     # Parallel processing
+batch_size = 256
 
 all = False
 if all:
-    file_pattern = ["cluster1_*.pkl", "goes8_*.pkl", "themise_*.pkl"]  # Desired satellites
+    file_patterns = ["cluster1_*.pkl", "goes8_*.pkl", "themise_*.pkl"]  # Desired satellites
 else:
-    file_pattern = ["cluster1_*.pkl"]
+    file_patterns = ["cluster1_*.pkl"]
+
+process_all_inputs = False
+# If process_all_inputs = False
+inputs_to_process = [None]     # Desired inputs to remove. If single input used below or no removal desired, set = [None]
 
 # Define input and output column names
-inputs = ["r", "theta", "phi", "vsw", "ey", "imfbz", "nsw"]
-field = ["bx[nT]", "by[nT]", "bz[nT]"]
-position_cart = ["x[km]", "y[km]", "z[km]"]
+inputs = ["r[km]", "theta[deg]", "phi[deg]", "vsw[km/s]", "ey[mV/m]", "imfbz[nT]", "nsw[1/cm^3]"]
+#inputs = ["theta[deg]"]
+outputs = ["bx[nT]", "by[nT]", "bz[nT]"]
+
+# Labels for derived columns
 position_sph = ["r[km]", "theta[deg]", "phi[deg]"]
-
-data_directory = "./data/"
-
+position_cart = ["x[km]", "y[km]", "z[km]"]
 
 # Device configuration
 if torch.backends.mps.is_available():
@@ -38,6 +49,7 @@ elif torch.cuda.is_available():
     device = torch.device("cuda")   # Use CUDA on Windows/Linux
 else:
     device = torch.device("cpu")    # CPU Fallback
+device = torch.device("cpu")
 print(f"Using device: {device}")
 
 # Define directories to save plots and results
@@ -86,16 +98,6 @@ def data_load(data_directory, file_pattern, position_cart, position_sph):
         # Add spherical coordinates to the DataFrame
         for i, col in enumerate(position_sph):
             df[col] = spherical[:, i]
-        
-        df.rename(columns={
-            "r[km]": "r",
-            "theta[deg]": "theta",
-            "phi[deg]": "phi",
-            "vsw[km/s]": "vsw",
-            "ey[mV/m]": "ey",
-            "imfbz[nT]": "imfbz",
-            "nsw[1/cm^3]": "nsw"
-        }, inplace=True)
 
         df['datetime'] = pd.to_datetime(
             df[['year', 'month', 'day', 'hour', 'minute', 'second']]
@@ -116,6 +118,7 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
     for i, test_data in enumerate(datasets):
         if is_loo:
             # For leave-one-out, concatenate training datasets excluding the current test dataset
+            print(f"  {time.time()-start}")
             print(f"  Leave-one-out: Using segment {i + 1}/{len(datasets)} as the test set")
             train_data = pd.concat([df for j, df in enumerate(datasets) if j != i], ignore_index=True)
             method_label = f"LOO_{i + 1}"
@@ -128,7 +131,7 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
         # Loop for bootstrapping and processing repetitions
         results = {}
         for rep in range(num_boot_reps):
-            print(f"    Repetition {rep + 1}/{num_boot_reps}")
+            print(f"    Repetition {rep + 1}/{num_boot_reps} started at {time.time()-start}")
             train_boot = train_data.sample(frac=0.8, random_state=rep)
             test_data = datasets[i] if is_loo else datasets[0]  # Test data comes from the current fold
             rep_results = process_single_rep(train_boot, test_data, removed_input)
@@ -152,9 +155,9 @@ def process_single_rep(train_df, test_df, removed_input=None):
 
     # Convert data to tensors
     train_inputs = torch.tensor(train_df[current_inputs].values, dtype=torch.float32).to(device)
-    train_targets = torch.tensor(train_df[field].values, dtype=torch.float32).to(device)
+    train_targets = torch.tensor(train_df[outputs].values, dtype=torch.float32).to(device)
     test_inputs = torch.tensor(test_df[current_inputs].values, dtype=torch.float32).to(device)
-    test_targets = torch.tensor(test_df[field].values, dtype=torch.float32).to(device)
+    test_targets = torch.tensor(test_df[outputs].values, dtype=torch.float32).to(device)
 
     # Neural network training with multi-output
     model_multi = SatNet(num_inputs=num_inputs).to(device)
@@ -164,7 +167,7 @@ def process_single_rep(train_df, test_df, removed_input=None):
     for epoch in range(num_epochs):
         print(f"{indent}  Epoch {epoch + 1}/{num_epochs}", end='')
         total_loss = 0
-        for data, target in DataLoader(TensorDataset(train_inputs, train_targets), batch_size=256, shuffle=True):
+        for data, target in DataLoader(TensorDataset(train_inputs, train_targets), batch_size=batch_size, shuffle=True):
             opt_multi.zero_grad()
             loss = nn.MSELoss()(model_multi(data), target)
             loss.backward()
@@ -186,7 +189,7 @@ def process_single_rep(train_df, test_df, removed_input=None):
 
         for epoch in range(num_epochs):
             print(f"{indent}    Epoch {epoch + 1}/{num_epochs}", end='')
-            for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, i:i+1]), batch_size=256, shuffle=True):
+            for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, i:i+1]), batch_size=batch_size, shuffle=True):
                 opt_single.zero_grad()
                 loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
                 loss.backward()
@@ -200,24 +203,27 @@ def process_single_rep(train_df, test_df, removed_input=None):
     # Linear Regression as a baseline
     print(f"{indent}Performing linear regresssion")
     lr_model = LinearRegression()
-    lr_model.fit(train_df[current_inputs], train_df[field])
+    #import pdb; pdb.set_trace()
+    print(train_df[current_inputs])
+    print(train_df[outputs])
+    lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
 
     # Collect results in a DataFrame
     rep_results = pd.DataFrame({
         'timestamp': test_df['datetime'].values,
-        'bx_actual': test_targets[:, 0].cpu().numpy().round(3),
-        'by_actual': test_targets[:, 1].cpu().numpy().round(3),
-        'bz_actual': test_targets[:, 2].cpu().numpy().round(3),
-        'bx_nn3': nn_preds[:, 0].round(3),
-        'by_nn3': nn_preds[:, 1].round(3),
-        'bz_nn3': nn_preds[:, 2].round(3),
-        'bx_nn1': nn_single_outputs['bx'].round(3),
-        'by_nn1': nn_single_outputs['by'].round(3),
-        'bz_nn1': nn_single_outputs['bz'].round(3),
-        'bx_lr': lr_preds[:, 0].round(3),
-        'by_lr': lr_preds[:, 1].round(3),
-        'bz_lr': lr_preds[:, 2].round(3),
+        'bx_actual': test_targets[:, 0].cpu().numpy(),
+        'by_actual': test_targets[:, 1].cpu().numpy(),
+        'bz_actual': test_targets[:, 2].cpu().numpy(),
+        'bx_nn3': nn_preds[:, 0],
+        'by_nn3': nn_preds[:, 1],
+        'bz_nn3': nn_preds[:, 2],
+        'bx_nn1': nn_single_outputs['bx'],
+        'by_nn1': nn_single_outputs['by'],
+        'bz_nn1': nn_single_outputs['bz'],
+        'bx_lr': lr_preds[:, 0],
+        'by_lr': lr_preds[:, 1],
+        'bz_lr': lr_preds[:, 2],
     })
 
     return rep_results
@@ -257,35 +263,55 @@ kwargs = {
     'num_boot_reps': num_boot_reps,
 }
 
-# Iterate over each file pattern
-for pattern in file_pattern:
+def job(job_input):
+    file_pattern = job_input[0]
+    input_to_remove = job_input[1]
+
     print("-" * 50)
-    print(f"Processing file pattern: {pattern}")
+    print(f"Processing file pattern: {file_pattern} in {data_directory}")
 
     # Load data using data_load function
-    combined_dfs = data_load(data_directory, pattern, position_cart, position_sph)
+    combined_dfs = data_load(data_directory, file_pattern, position_cart, position_sph)
 
-    ny = min(ny, len(combined_dfs))  # Limit to ny for testing
-    if len(combined_dfs) > 1:
-        combined_dfs = combined_dfs[0:ny]
+    if ny:
+        ny_min = min(ny, len(combined_dfs))  # Limit to ny for testing
+        if len(combined_dfs) > 1:
+            combined_dfs = combined_dfs[0:ny_min]
 
-    print(f"Loaded {len(combined_dfs)} datasets from pattern: {pattern}")
+    print(f"Loaded {len(combined_dfs)} datasets from pattern: {file_pattern}")
 
     if not combined_dfs:
-        print(f"No datasets found for pattern: {pattern}. Skipping.")
-        continue
+        print(f"No datasets found for pattern: {file_pattern}. Skipping.")
+        return
 
     # Determine whether to use leave-one-out or full data
     use_leave_one_out = len(combined_dfs) > 1
     print(f"Leave-one-out mode: {use_leave_one_out}")
 
-    # Train models with all parameters and each parameter removed
-    for input_to_remove in [None] + inputs:
-        kwargs['removed_input'] = input_to_remove
+    kwargs['removed_input'] = input_to_remove
+    if input_to_remove is None:
+        print("Training model with no parameters removed")
+    else:
+        print(f"Training model with '{input_to_remove}' removed")
 
-        if input_to_remove is None:
-            print("Training model with no parameters removed")
-        else:
-            print(f"Training model with '{input_to_remove}' removed")
+    train_and_test(combined_dfs=combined_dfs, file_pattern=file_pattern, **kwargs)
 
-        train_and_test(combined_dfs=combined_dfs, file_pattern=pattern, **kwargs)
+job_inputs = []
+for file_pattern in file_patterns:
+    if process_all_inputs:
+        for input_to_remove in [None] + inputs:
+            job_inputs.append([file_pattern, input_to_remove])
+    else:
+        for input_to_remove in inputs_to_process:
+            job_inputs.append([file_pattern, input_to_remove])
+
+if __name__ == '__main__':
+    if parallel:
+        import multiprocessing
+        ncpu = multiprocessing.cpu_count()
+        print(f"# cpus: {ncpu}")
+        p = multiprocessing.Pool(ncpu - 1 if ncpu > 1 else 1)
+        p.map(job, job_inputs)
+    else:
+        for job_input in job_inputs:
+            job(job_input)

@@ -97,36 +97,71 @@ for directory_name in satellite_list:
                 for model_type in ['nn3', 'nn1', 'lr']:
                     plt.figure(figsize=(12, 12))
 
-                    # Plot errors over time for bx, by, bz
-                    plt.subplot(3, 1, 1)
-                    plt.plot(total_data['timestamp'], total_data[f'error_bx_{model_type}'], label=f'{model_type} bx')
-                    plt.title(f'Time-Series Error for {model_type}')
-                    plt.ylabel('Bx')
-                    plt.xticks([])
-
-                    plt.subplot(3, 1, 2)
-                    plt.plot(total_data['timestamp'], total_data[f'error_by_{model_type}'], label=f'{model_type} by')
-                    plt.ylabel('By')
-                    plt.xticks([])
-
-                    plt.subplot(3, 1, 3)
-                    plt.plot(total_data['timestamp'], total_data[f'error_bz_{model_type}'], label=f'{model_type} bz')
-                    plt.xlabel('Time')
-                    plt.ylabel('Bz')
-
                     # Calculate rmse for the model type
                     rmse_bx = np.sqrt(np.mean((total_data[f'bx_actual'] - total_data[f'bx_{model_type}']) ** 2))
                     rmse_by = np.sqrt(np.mean((total_data[f'by_actual'] - total_data[f'by_{model_type}']) ** 2))
                     rmse_bz = np.sqrt(np.mean((total_data[f'bz_actual'] - total_data[f'bz_{model_type}']) ** 2))
 
-                    # Add the rmse to the plot as a text box
-                    rmse_text = f'RMSE bx: {rmse_bx:.4f}\nRMSE by: {rmse_by:.4f}\nRMSE bz: {rmse_bz:.4f}'
-                    plt.gcf().text(0.85, 0.95, rmse_text, fontsize=12, bbox=dict(facecolor='white', alpha=0.6, boxstyle='round,pad=0.5'))
-                    plt.tight_layout()
+                    # Plot errors over time for bx, by, bz
+                    plt.subplot(3, 1, 1)
+                    plt.plot(total_data['timestamp'], total_data[f'error_bx_{model_type}'], label=f'{model_type} bx')
+                    plt.title(f'{model_type} Error for Removed {removed_input}')
+                    plt.ylabel('Bx')
+                    plt.xticks([])
+                    plt.text(0.01, 0.95, f'RMSE: {rmse_bx:.4f}', transform=plt.gca().transAxes, fontsize=10, 
+                        bbox=dict(facecolor='white', alpha=0.6, boxstyle='round,pad=0.3'))
+
+                    plt.subplot(3, 1, 2)
+                    plt.plot(total_data['timestamp'], total_data[f'error_by_{model_type}'], label=f'{model_type} by')
+                    plt.ylabel('By')
+                    plt.xticks([])
+                    plt.text(0.01, 0.95, f'RMSE: {rmse_bx:.4f}', transform=plt.gca().transAxes, fontsize=10, 
+                        bbox=dict(facecolor='white', alpha=0.6, boxstyle='round,pad=0.3'))
+
+                    plt.subplot(3, 1, 3)
+                    plt.plot(total_data['timestamp'], total_data[f'error_bz_{model_type}'], label=f'{model_type} bz')
+                    plt.xlabel('Time')
+                    plt.ylabel('Bz')
+                    plt.text(0.01, 0.95, f'RMSE: {rmse_bx:.4f}', transform=plt.gca().transAxes, fontsize=10, 
+                        bbox=dict(facecolor='white', alpha=0.6, boxstyle='round,pad=0.3'))
                     
                     # Save the figure with a white background in the new subdirectory
                     plt.savefig(os.path.join(plots_dir, f"{directory_name}_{removed_input}_{model_type}_time_error.png"), transparent=False)
                     plt.close()
                     print(f"Saved time-series error plot for {model_type} in {removed_input} to {directory}")
+
+                # Plot time-series predictions vs actuals for each model type
+                for model_type in ['nn3', 'nn1', 'lr']:
+                    plt.figure(figsize=(12, 12))
+
+                    # Plot Bx
+                    plt.subplot(3, 1, 1)
+                    plt.plot(total_data['timestamp'], total_data[f'bx_actual'], label='Actual', color='black', linestyle='--')
+                    plt.plot(total_data['timestamp'], total_data[f'bx_{model_type}'], label=f'Predicted', color='red', alpha=0.7)
+                    plt.title(f'{model_type} for Removed {removed_input}')
+                    plt.ylabel('Bx')
+                    plt.legend(loc='upper right')
+                    plt.xticks([])
+                    
+                    # Plot By
+                    plt.subplot(3, 1, 2)
+                    plt.plot(total_data['timestamp'], total_data[f'by_actual'], label='Actual', color='black', linestyle='--')
+                    plt.plot(total_data['timestamp'], total_data[f'by_{model_type}'], label=f'Predicted', color='red', alpha=0.7)
+                    plt.ylabel('By')
+                    plt.legend(loc='upper right')
+                    plt.xticks([])
+
+                    # Plot Bz
+                    plt.subplot(3, 1, 3)
+                    plt.plot(total_data['timestamp'], total_data[f'bz_actual'], label='Actual', color='black', linestyle='--')
+                    plt.plot(total_data['timestamp'], total_data[f'bz_{model_type}'], label=f'Predicted', color='red', alpha=0.7)
+                    plt.xlabel('Time')
+                    plt.ylabel('Bz')
+                    plt.legend(loc='upper right')
+
+                    # Save the figure with a white background in the new subdirectory
+                    plt.savefig(os.path.join(plots_dir, f"{directory_name}_{removed_input}_{model_type}_time_predictions.png"), transparent=False)
+                    plt.close()
+                    print(f"Saved time-series predictions vs actuals plot for {model_type} in {removed_input} to {directory}")
 
     print(f"Finished processing for {directory_name}")

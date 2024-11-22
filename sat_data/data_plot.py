@@ -1,14 +1,19 @@
 import os
 import glob
-
 import numpy as np
 import pandas as pd
-
-import matplotlib.dates as dates
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 
-#Define plot function
+# column_info function to extract name, symbol, and unit from column names
+def column_info(column_name):
+    name = column_name.split('[')[0]
+    unit = column_name.split('[')[1].split(']')[1]
+    symbols = {'x': 'x', 'y': 'y', 'z': 'z', 'bx': 'B_x', 'by': 'B_y', 'bz': 'B_z'}
+    symbol = symbols.get(name, name)  # Default to name if not in the symbol dictionary
+    return name, symbol, unit
+
+# Define plot function
 def plot_data(dataframe, columns, labels, save_path, title, suptitle):
     plt.figure(figsize=(12, 12), facecolor='white')
     plt.suptitle(suptitle, fontsize=16)
@@ -42,47 +47,21 @@ for file_path in glob.glob(os.path.join(data_directory, '*.pkl')):
     dataframe['theta_b[rad]'] = np.arctan2(dataframe['by[nT]'], dataframe['bx[nT]'])
     dataframe['phi_b[rad]'] = np.arccos(dataframe['bz[nT]'] / dataframe['b[nT]'])
     print(f"Added polar coordinates for {file_name}")
+    
     # Add datetime column to dataframe
     dataframe['date'] = pd.to_datetime(dataframe[['year', 'month', 'day', 'hour', 'minute', 'second']])
 
-    # Plot position data
-    plot_data(
-        dataframe, 
-        ['x[km]', 'y[km]', 'z[km]'], 
-        ['x (km)', 'y (km)', 'z (km)'], 
-        os.path.join(save_directory, f"{file_name}_position.png"), 
-        "position",
-        suptitle = f"{file_name} - Position"
-    )
+    # Define plot groups
+    plot_groups = [
+        (['x[km]', 'y[km]', 'z[km]'], ['x (km)', 'y (km)', 'z (km)'], f"{file_name}_position.png", "Position", f"{file_name} - Position"),
+        (['r[km]', 'theta[rad]', 'phi[rad]'], ['r (km)', 'φ (rad)', 'θ (rad)'], f"{file_name}_position_polar.png", "Polar Position", f"{file_name} - Position, Polar"),
+        (['bx[nT]', 'by[nT]', 'bz[nT]'], ['Bx (nT)', 'By (nT)', 'Bz (nT)'], f"{file_name}_bvalues.png", "Magnetic Field", f"{file_name} - Magnetic Field"),
+        (['b[nT]', 'theta_b[rad]', 'phi_b[rad]'], ['B (nT)', 'φ (rad)', 'θ (rad)'], f"{file_name}_bvalues_polar.png", "Polar Magnetic Field", f"{file_name} - Magnetic Field, Polar")
+    ]
 
-    # Plot polar position data
-    plot_data(
-        dataframe, 
-        ['r[km]', 'theta[rad]', 'phi[rad]'], 
-        ['r (km)', 'φ (rad)', 'θ (rad)'], 
-        os.path.join(save_directory, f"{file_name}_position_polar.png"), 
-        "polar position",
-        suptitle = f"{file_name} - Position, Polar"
-    )
-
-    # Plot magnetic field data
-    plot_data(
-        dataframe, 
-        ['bx[nT]', 'by[nT]', 'bz[nT]'], 
-        ['Bx (nT)', 'By (nT)', 'Bz (nT)'], 
-        os.path.join(save_directory, f"{file_name}_bvalues.png"), 
-        "magnetic field",
-        suptitle = f"{file_name} - Magnetic Field"
-    )
-
-    # Plot polar magnetic field data
-    plot_data(
-        dataframe, 
-        ['b[nT]', 'theta_b[rad]', 'phi_b[rad]'], 
-        ['B (nT)', 'φ (rad)', 'θ (rad)'], 
-        os.path.join(save_directory, f"{file_name}_bvalues_polar.png"), 
-        "polar magnetic field",
-        suptitle = f"{file_name} - Magnetic Field, Polar"
-    )
+    # Generate and save plots
+    for columns, labels, save_filename, title, suptitle in plot_groups:
+        save_path = os.path.join(save_directory, save_filename)
+        plot_data(dataframe, columns, labels, save_path, title, suptitle)
 
 print('All plots created from directory')
