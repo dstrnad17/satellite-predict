@@ -21,9 +21,9 @@ ny = 2              # Number of years to use; Use 'All' for all years
 num_epochs = 2      # Number of epochs
 num_boot_reps = 2   # Number of bootstrap repetitions
 
-parallel = True
+parallel = False     # Parallel processing
 batch_size = 256
-lr = 0.0006
+lr = 0.0006         # Learning rate
 print(f"Batch Size = {batch_size}, Learning Rate = {lr}")
 
 all_patterns = False
@@ -38,9 +38,9 @@ leave_outs = ["r[km]", "theta[deg]"] # or None
 inputs = ["r[km]", "theta[deg]", "phi[deg]", "vsw[km/s]", "ey[mV/m]", "imfbz[nT]", "nsw[1/cm^3]"]
 outputs = ["bx[nT]", "by[nT]", "bz[nT]"]
 output_bases = [output.split('[')[0] for output in outputs]     
-# Code assumes columns with these unit structures, modification may be needed depending on column names
+# Code assumes columns with these unit structures (i.e. bx[nT]), modification may be needed depending on column names
 
-# Labels for derived columns
+# Labels for derived columns used to convert from Cartesian to spherical
 position_sph = ["r[km]", "theta[deg]", "phi[deg]"]
 position_cart = ["x[km]", "y[km]", "z[km]"]
 
@@ -141,18 +141,37 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
         # Save the results after all repetitions are completed
         save_results(results, file_pattern, removed_input, results_directory, method=method_label)
 
+def normalize(df, columns):
+    means = df[columns].mean()
+    stds = df[columns].std()
+    normalized_df = df.copy()
+    normalized_df[columns] = (df[columns] - means) / stds
+    return normalized_df, means, stds
+
+def denormalize(normalized_values, means, stds):
+
+    return normalized_values * stds + means
+
 # Helper function to process a single training/testing repetition
 def process_single_rep(train_df, test_df, inputs, removed_input=None):
-
     indent = "      "
 
     # Determine the current input features
     current_inputs = [inp for inp in inputs if inp != removed_input] if removed_input else inputs
-    num_inputs = len(current_inputs)  # Calculate number of inputs based on current inputs
+    num_inputs = len(current_inputs)
 
     # Fill missing values
     train_df.fillna(train_df.mean(numeric_only=True), inplace=True)
     test_df.fillna(test_df.mean(numeric_only=True), inplace=True)
+
+    # Normalize the data
+    train_df, train_means, train_stds = normalize(train_df, current_inputs + outputs)
+    test_df, test_means, test_stds = normalize(test_df, current_inputs + outputs)
+
+    # Ensure all required keys exist
+    missing_keys = [key for key in outputs if key not in test_means.index or key not in test_stds.index]
+    if missing_keys:
+        raise KeyError(f"Missing keys in test_means or test_stds: {missing_keys}")
 
     # Convert data to tensors
     train_inputs = torch.tensor(train_df[current_inputs].values, dtype=torch.float32).to(device)
@@ -179,6 +198,8 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
     model_multi.eval()
     with torch.no_grad():
         nn3_preds = model_multi(test_inputs).cpu().numpy()  # Multi-output NN predictions
+        # Denormalize predictions
+        nn3_preds = denormalize(nn3_preds, test_means[outputs].values, test_stds[outputs].values)
 
     # Single-output neural networks
     print(f"{indent}Training single-output neural networks")
@@ -190,7 +211,6 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
 
         for epoch in range(num_epochs):
             print(f"{indent}    Epoch {epoch + 1}/{num_epochs}", end='')
-            # Find the index of the base in the outputs list to select the corresponding target column
             target_index = output_bases.index(base)
             for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, target_index:target_index+1]), batch_size=batch_size, shuffle=True):
                 opt_single.zero_grad()
@@ -201,14 +221,17 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
 
         model_single.eval()
         with torch.no_grad():
-            # Store predictions for each output variable dynamically
             nn1_preds[base] = model_single(test_inputs).cpu().numpy()
+            # Denormalize predictions
+            nn1_preds[base] = denormalize(nn1_preds[base], test_means[f"{base}[nT]"], test_stds[f"{base}[nT]"])
 
     # Linear Regression as a baseline
-    print(f"{indent}Performing linear regresssion")
+    print(f"{indent}Performing linear regression")
     lr_model = LinearRegression()
     lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
+    # Denormalize predictions
+    lr_preds = denormalize(lr_preds, test_means[outputs].values, test_stds[outputs].values)
 
     model_types = ['nn3', 'nn1', 'lr']
     results_dict = {
@@ -217,7 +240,6 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
     for base in output_bases:
         results_dict[f'{base}_actual'] = test_targets[:, output_bases.index(base)].cpu().numpy()
 
-    # Loop over model types and add corresponding predictions to the results dictionary
     for model in model_types:
         for base in output_bases:
             if model == 'nn3':
@@ -227,7 +249,6 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
             elif model == 'lr':
                 results_dict[f'{base}_{model}'] = lr_preds[:, output_bases.index(base)]
 
-    # Create the DataFrame using the results dictionary
     rep_results = pd.DataFrame(results_dict)
     print(rep_results)
 
