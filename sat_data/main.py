@@ -12,14 +12,15 @@ import pandas as pd
 import multiprocessing
 
 from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
 
 data_directory = "./data/"
 start = time.time()
 
 ny = 2              # Number of years to use; Use 'All' for all years
-num_epochs = 2      # Number of epochs
-num_boot_reps = 2   # Number of bootstrap repetitions
+num_epochs = 5      # Number of epochs
+num_boot_reps = 1   # Number of bootstrap repetitions
 
 parallel = False     # Parallel processing
 batch_size = 256
@@ -141,17 +142,6 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
         # Save the results after all repetitions are completed
         save_results(results, file_pattern, removed_input, results_directory, method=method_label)
 
-def normalize(df, columns):
-    means = df[columns].mean()
-    stds = df[columns].std()
-    normalized_df = df.copy()
-    normalized_df[columns] = (df[columns] - means) / stds
-    return normalized_df, means, stds
-
-def denormalize(normalized_values, means, stds):
-
-    return normalized_values * stds + means
-
 # Helper function to process a single training/testing repetition
 def process_single_rep(train_df, test_df, inputs, removed_input=None):
     indent = "      "
@@ -165,18 +155,20 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
     test_df.fillna(test_df.mean(numeric_only=True), inplace=True)
 
     # Normalize the data
-    train_df, train_means, train_stds = normalize(train_df, current_inputs + outputs)
-    test_df, test_means, test_stds = normalize(test_df, current_inputs + outputs)
+    scaler_inputs = MinMaxScaler()
+    scaler_targets = MinMaxScaler()
 
-    # Ensure all required keys exist
-    missing_keys = [key for key in outputs if key not in test_means.index or key not in test_stds.index]
-    if missing_keys:
-        raise KeyError(f"Missing keys in test_means or test_stds: {missing_keys}")
+    train_inputs_scaled = pd.DataFrame(scaler_inputs.fit_transform(train_df[current_inputs]), 
+                                    columns=current_inputs, index=train_df.index)
+    train_targets_scaled = pd.DataFrame(scaler_targets.fit_transform(train_df[outputs]), 
+                                    columns=outputs, index=train_df.index)
+    test_inputs_scaled = pd.DataFrame(scaler_inputs.transform(test_df[current_inputs]), 
+                                    columns=current_inputs, index=test_df.index)
 
     # Convert data to tensors
-    train_inputs = torch.tensor(train_df[current_inputs].values, dtype=torch.float32).to(device)
-    train_targets = torch.tensor(train_df[outputs].values, dtype=torch.float32).to(device)
-    test_inputs = torch.tensor(test_df[current_inputs].values, dtype=torch.float32).to(device)
+    train_inputs = torch.tensor(train_inputs_scaled.values, dtype=torch.float32).to(device)
+    train_targets = torch.tensor(train_targets_scaled.values, dtype=torch.float32).to(device)
+    test_inputs = torch.tensor(test_inputs_scaled.values, dtype=torch.float32).to(device)
     test_targets = torch.tensor(test_df[outputs].values, dtype=torch.float32).to(device)
 
     # Neural network training with multi-output
@@ -187,19 +179,40 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
     for epoch in range(num_epochs):
         print(f"{indent}  Epoch {epoch + 1}/{num_epochs}", end='')
         total_loss = 0
+        all_predictions = []
+        all_targets = []
+        
         for data, target in DataLoader(TensorDataset(train_inputs, train_targets), batch_size=batch_size, shuffle=True):
             opt_multi.zero_grad()
-            loss = nn.MSELoss()(model_multi(data), target)
+            predictions = model_multi(data)
+            loss = nn.MSELoss()(predictions, target)
             loss.backward()
             opt_multi.step()
             total_loss += loss.item()
-        print(f" loss = {loss}")
+            
+            # Collect all predictions and targets for ARV calculation
+            all_predictions.append(predictions.detach().cpu().numpy())
+            all_targets.append(target.cpu().numpy())
+        
+        # Compute ARV for each output
+        all_predictions = np.vstack(all_predictions)
+        all_targets = np.vstack(all_targets)
+        arvs = []
+        for base in output_bases:
+            base_index = output_bases.index(base)
+            A = all_predictions[:, base_index] 
+            P = all_targets[:, base_index]
+            arv = np.var(A - P) / np.var(A) if np.var(A) > 0 else 0
+            arvs.append(arv)
+            print(f" | {base} ARV = {arv:.3f}", end='')
+
+        print(f" loss = {total_loss:.4f}")
 
     model_multi.eval()
     with torch.no_grad():
         nn3_preds = model_multi(test_inputs).cpu().numpy()  # Multi-output NN predictions
         # Denormalize predictions
-        nn3_preds = denormalize(nn3_preds, test_means[outputs].values, test_stds[outputs].values)
+        nn3_preds = scaler_targets.inverse_transform(nn3_preds)
 
     # Single-output neural networks
     print(f"{indent}Training single-output neural networks")
@@ -215,39 +228,43 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
             for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, target_index:target_index+1]), batch_size=batch_size, shuffle=True):
                 opt_single.zero_grad()
                 loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
+                A = model_single(data).squeeze(-1).detach().numpy()
+                P = target.squeeze(-1).numpy()
+                arv = np.var(A-P)/np.var(A)
                 loss.backward()
                 opt_single.step()
-            print(f" loss = {loss}")
+            print(f" loss = {loss:.4f}; ARV = {arv:.3f}")
 
         model_single.eval()
         with torch.no_grad():
             nn1_preds[base] = model_single(test_inputs).cpu().numpy()
             # Denormalize predictions
-            nn1_preds[base] = denormalize(nn1_preds[base], test_means[f"{base}[nT]"], test_stds[f"{base}[nT]"])
+            scaler_targets.min_ = scaler_targets.min_[:1]
+            scaler_targets.scale_ = scaler_targets.scale_[:1]
+            nn1_preds[base] = scaler_targets.inverse_transform(nn1_preds[base].reshape(-1,1))
 
     # Linear Regression as a baseline
     print(f"{indent}Performing linear regression")
     lr_model = LinearRegression()
     lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
-    # Denormalize predictions
-    lr_preds = denormalize(lr_preds, test_means[outputs].values, test_stds[outputs].values)
 
     model_types = ['nn3', 'nn1', 'lr']
     results_dict = {
         'timestamp': test_df['datetime'].values,
     }
+
     for base in output_bases:
         results_dict[f'{base}_actual'] = test_targets[:, output_bases.index(base)].cpu().numpy()
-
+        
     for model in model_types:
         for base in output_bases:
             if model == 'nn3':
-                results_dict[f'{base}_{model}'] = nn3_preds[:, output_bases.index(base)]
+                results_dict[f'{base}_{model}'] = nn3_preds[:, output_bases.index(base)].flatten()
             elif model == 'nn1':
-                results_dict[f'{base}_{model}'] = nn1_preds[base]
+                results_dict[f'{base}_{model}'] = nn1_preds[base].flatten()
             elif model == 'lr':
-                results_dict[f'{base}_{model}'] = lr_preds[:, output_bases.index(base)]
+                results_dict[f'{base}_{model}'] = lr_preds[:, output_bases.index(base)].flatten()
 
     rep_results = pd.DataFrame(results_dict)
     print(rep_results)
