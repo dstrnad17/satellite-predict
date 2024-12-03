@@ -19,7 +19,7 @@ data_directory = "./data/"
 start = time.time()
 
 ny = 2              # Number of years to use; Use 'All' for all years
-num_epochs = 5      # Number of epochs
+num_epochs = 2    # Number of epochs
 num_boot_reps = 1   # Number of bootstrap repetitions
 
 parallel = False     # Parallel processing
@@ -35,10 +35,10 @@ else:
 
 # Define inputs and outputs
 all_input_model = True
-leave_outs = ["r[km]", "theta[deg]"] # or None
+leave_outs = None #["r[km]", "theta[deg]"] # or None
 inputs = ["r[km]", "theta[deg]", "phi[deg]", "vsw[km/s]", "ey[mV/m]", "imfbz[nT]", "nsw[1/cm^3]"]
 outputs = ["bx[nT]", "by[nT]", "bz[nT]"]
-output_bases = [output.split('[')[0] for output in outputs]     
+output_bases = [output.split('[')[0] for output in outputs]
 # Code assumes columns with these unit structures (i.e. bx[nT]), modification may be needed depending on column names
 
 # Labels for derived columns used to convert from Cartesian to spherical
@@ -228,8 +228,8 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
             for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, target_index:target_index+1]), batch_size=batch_size, shuffle=True):
                 opt_single.zero_grad()
                 loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
-                A = model_single(data).squeeze(-1).detach().numpy()
-                P = target.squeeze(-1).numpy()
+                A = model_single(data).detach().cpu().squeeze(-1).numpy()
+                P = target.detach().cpu().squeeze(-1).numpy()
                 arv = np.var(A-P)/np.var(A)
                 loss.backward()
                 opt_single.step()
@@ -248,7 +248,19 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
     lr_model = LinearRegression()
     lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
+    import pdb; pdb.set_trace()
+    #(Pdb) train_df[outputs].shape
+    #(38250, 3)
+    #(Pdb) lr_preds.shape
+    #(63578, 3)
+    for c in range(lr_preds.shape[1]):
+        A = train_df[outputs].values[:, c]
+        P = lr_preds[:, c]
+        arv = np.var(A - P) / np.var(A) if np.var(A) > 0 else 0
+        arvs.append(arv)
+        print(f" | {base} ARV = {arv:.3f}", end='')
 
+    import pdb; pdb.set_trace()
     model_types = ['nn3', 'nn1', 'lr']
     results_dict = {
         'timestamp': test_df['datetime'].values,
