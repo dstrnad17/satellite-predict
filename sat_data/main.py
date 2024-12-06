@@ -12,18 +12,8 @@ import pandas as pd
 
 import multiprocessing
 
-from datetime import datetime
-
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import MinMaxScaler
-
-log_directory = './logs/'
-if not os.path.exists(log_directory):
-    os.makedirs(log_directory)
-
-log_file_path = os.path.join(log_directory, f"main_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
-log_file = open(log_file_path, 'w')
-sys.stdout = log_file
 
 data_directory = "./data/"
 start = time.time()
@@ -381,5 +371,3 @@ if __name__ == '__main__':
     else:
         for job_input in job_inputs:
             job(**job_input)
-
-    log_file.close()
