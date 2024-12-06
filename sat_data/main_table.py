@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import numpy as np
 
-# Specify the base directory containing the results
 base_directory = "./main_results/"
 if not os.path.exists(base_directory):
     os.makedirs(base_directory)
@@ -16,10 +15,30 @@ else:
     satellite_list = ["cluster1"] 
 
 # List of columns to calculate mean, std dev, and RMSE
-preds_nn3 = ['bx_nn3', 'by_nn3', 'bz_nn3']
-preds_lr = ['bx_lr', 'by_lr', 'bz_lr']
-preds_nn1 = ['bx_nn1', 'by_nn1', 'bz_nn1']
+preds = {
+    'nn3': ['bx_nn3', 'by_nn3', 'bz_nn3'],
+    'nn1': ['bx_nn1', 'by_nn1', 'bz_nn1'],
+    'lr': ['bx_lr', 'by_lr', 'bz_lr']
+}
 actual = ['bx_actual', 'by_actual', 'bz_actual']
+
+# Function to compute average relative variance (ARV), this function appears in each program
+def compute_arv(A, P):
+    if isinstance(A, pd.DataFrame):
+        A = A.to_numpy()
+    if isinstance(P, pd.DataFrame):
+        P = P.to_numpy()
+
+    if A.ndim == 1:
+        A, P = np.expand_dims(A, axis=1), np.expand_dims(P, axis=1)
+
+    arvs = []
+    for i in range(A.shape[1]):
+        var_A = np.var(A[:, i])
+        arv = np.var(A[:, i] - P[:, i]) / var_A if var_A > 0 else 0
+        arvs.append(arv)
+    
+    return arvs if len(arvs) > 1 else arvs[0]
 
 # Iterate over each pattern (e.g., goes8, cluster1)
 for directory_name in satellite_list:
@@ -27,13 +46,12 @@ for directory_name in satellite_list:
     summary_data = []
     data_input = {}
 
-    # Iterate through subdirectories under each pattern (e.g., 'none', 'bx', 'by', etc.)
+    # Iterate through subdirectories under each pattern
     for removed_input_dir in os.listdir(directory):
         removed_input_dir_path = os.path.join(directory, removed_input_dir)
         if os.path.isdir(removed_input_dir_path):
             print(f"Processing removed input: {removed_input_dir}")  # Debug print
 
-            # Initialize data for this removed input
             data_input[removed_input_dir] = []
 
             # Iterate through each .pkl file in the removed_input subdirectory
@@ -44,7 +62,7 @@ for directory_name in satellite_list:
                     # Extract the removed input from the directory name
                     removed_input = removed_input_dir
 
-                    print(f"Loading file: {file_path}")  # Debug print
+                    print(f"Loading file: {file_path}")
 
                     # Load the .pkl file
                     try:
@@ -61,8 +79,6 @@ for directory_name in satellite_list:
 
                     # Concatenate each rep df
                     concat_df_rep = pd.concat(rep_dataframes, ignore_index=True)
-
-                    # Append concatenated dataframe to data_input
                     data_input[removed_input].append(concat_df_rep)
 
             # After all files for this removed_input are processed, concatenate the data
@@ -73,65 +89,25 @@ for directory_name in satellite_list:
                 avg_df = total_data.mean(axis=0)
                 std_df = total_data.std(axis=0)
 
-                # Calculate mean, std, rmse after averaging the reps
-                means_nn3 = avg_df[preds_nn3]
-                stds_nn3 = std_df[preds_nn3]
+                for model_type, model_preds in preds.items():
+                    means = avg_df[model_preds]
+                    stds = std_df[model_preds]
+                    arv = compute_arv(total_data[actual], total_data[model_preds])
 
-                means_nn1 = avg_df[preds_nn1]
-                stds_nn1 = std_df[preds_nn1]
+                    result = {'Removed Input': removed_input, 'Model': model_type}
+                    
+                    components = set(col.split('_')[0] for col in model_preds)  # Extract 'bx', 'by', 'bz'
 
-                means_lr = avg_df[preds_lr]
-                stds_lr = std_df[preds_lr]
+                    # Add mean, std, and ARV for each component
+                    for component in components:
+                        result[f'Mean_{component}'] = means[means.index.str.startswith(component)].values[0]
+                        result[f'Std_{component}'] = stds[stds.index.str.startswith(component)].values[0]
+                        result[f'ARV_{component}'] = arv[list(components).index(component)]
 
-                # Calculate RMSE for nn3
-                rmse_nn3 = [
-                    np.sqrt(np.mean(((total_data['bx_actual'] - total_data['bx_nn3']) ** 2))),
-                    np.sqrt(np.mean(((total_data['by_actual'] - total_data['by_nn3']) ** 2))),
-                    np.sqrt(np.mean(((total_data['bz_actual'] - total_data['bz_nn3']) ** 2)))
-                ]
-
-                # Calculate RMSE for nn1
-                rmse_nn1 = [
-                    np.sqrt(np.mean(((total_data['bx_actual'] - total_data['bx_nn1']) ** 2))),
-                    np.sqrt(np.mean(((total_data['by_actual'] - total_data['by_nn1']) ** 2))),
-                    np.sqrt(np.mean(((total_data['bz_actual'] - total_data['bz_nn1']) ** 2)))
-                ]
-
-                # Calculate RMSE for lr
-                rmse_lr = [
-                    np.sqrt(np.mean(((total_data['bx_actual'] - total_data['bx_lr']) ** 2))),
-                    np.sqrt(np.mean(((total_data['by_actual'] - total_data['by_lr']) ** 2))),
-                    np.sqrt(np.mean(((total_data['bz_actual'] - total_data['bz_lr']) ** 2)))
-                ]
-
-                # Create a combined result for each model type
-                for model_type, means, stds, rmse in zip(
-                    ['nn3', 'nn1', 'lr'],
-                    [means_nn3, means_nn1, means_lr],
-                    [stds_nn3, stds_nn1, stds_lr],
-                    [rmse_nn3, rmse_nn1, rmse_lr]
-                ):
-                    result = {
-                        'Removed Input': removed_input,
-                        'Model': model_type,
-                        'Mean_bx': means['bx_' + model_type],
-                        'Std_bx': stds['bx_' + model_type],
-                        'RMSE_bx': rmse[0],
-                        'Mean_by': means['by_' + model_type],
-                        'Std_by': stds['by_' + model_type],
-                        'RMSE_by': rmse[1],
-                        'Mean_bz': means['bz_' + model_type],
-                        'Std_bz': stds['bz_' + model_type],
-                        'RMSE_bz': rmse[2],
-                    }
-
-                    # Append the result to the summary_data list
                     summary_data.append(result)
 
     # Combine all the summary data into one table
     summary = pd.DataFrame(summary_data)
-    
-    # Remove duplicates if any
     summary = summary.drop_duplicates()
 
     # Save summary as markdown file
