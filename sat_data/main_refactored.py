@@ -1,4 +1,4 @@
-from satellite_predict.train_and_test import train_and_test
+from satellite_predict.train_and_test import train_and_test, table
 
 # This will be the main interface to the program. User provides kwargs
 # and a program to return combined_dfs.
@@ -64,3 +64,5 @@ combined_dfs = data_load("./data/", f"{tag}*.pkl")
 print(len(combined_dfs))
 print(combined_dfs[0].head())
 train_and_test(combined_dfs, tag, **kwargs)
+
+#table(tag, **kwargs)
