@@ -13,12 +13,12 @@ import multiprocessing
 
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error
 
 data_directory = "./data/"
 start = time.time()
 
 ny = 2              # Number of years to use; Use 'All' for all years
+num_epochs = 2    # Number of epochs
 num_epochs = 2    # Number of epochs
 num_boot_reps = 1   # Number of bootstrap repetitions
 
@@ -35,9 +35,10 @@ else:
 
 # Define inputs and outputs
 all_input_model = True
-leave_outs = None #["r[km]", "theta[deg]"] # or None
+leave_outs = ["r[km]", "theta[deg]"]   # ["r[km]", "theta[deg]", etc.] or None
 inputs = ["r[km]", "theta[deg]", "phi[deg]", "vsw[km/s]", "ey[mV/m]", "imfbz[nT]", "nsw[1/cm^3]"]
 outputs = ["bx[nT]", "by[nT]", "bz[nT]"]
+output_bases = [output.split('[')[0] for output in outputs]
 output_bases = [output.split('[')[0] for output in outputs]
 # Code assumes columns with these unit structures (i.e. bx[nT]), modification may be needed depending on column names
 
@@ -85,6 +86,24 @@ def appendSpherical_np(xyz):
     phi = np.arctan2(xyz[:, 1], xyz[:, 0])
     phi = np.where(phi < 0, phi + 2 * np.pi, phi) * 180 / np.pi
     return np.column_stack((r, theta, phi))
+
+# Function to compute average relative variance (ARV), this function appears in each program
+def compute_arv(A, P):
+    if isinstance(A, pd.DataFrame):
+        A = A.to_numpy()
+    if isinstance(P, pd.DataFrame):
+        P = P.to_numpy()
+
+    if A.ndim == 1:
+        A, P = np.expand_dims(A, axis=1), np.expand_dims(P, axis=1)
+
+    arvs = []
+    for i in range(A.shape[1]):
+        var_A = np.var(A[:, i])
+        arv = np.var(A[:, i] - P[:, i]) / var_A if var_A > 0 else 0
+        arvs.append(arv)
+    
+    return arvs if len(arvs) > 1 else arvs[0]
 
 # Function to load and preprocess data
 def data_load(data_directory, file_pattern, position_cart, position_sph):
@@ -197,15 +216,9 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
         # Compute ARV for each output
         all_predictions = np.vstack(all_predictions)
         all_targets = np.vstack(all_targets)
-        arvs = []
-        for base in output_bases:
-            base_index = output_bases.index(base)
-            A = all_predictions[:, base_index] 
-            P = all_targets[:, base_index]
-            arv = np.var(A - P) / np.var(A) if np.var(A) > 0 else 0
-            arvs.append(arv)
+        arvs = compute_arv(all_predictions, all_targets)
+        for base, arv in zip(output_bases, arvs):
             print(f" | {base} ARV = {arv:.3f}", end='')
-
         print(f" loss = {total_loss:.4f}")
 
     model_multi.eval()
@@ -230,7 +243,7 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
                 loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
                 A = model_single(data).detach().cpu().squeeze(-1).numpy()
                 P = target.detach().cpu().squeeze(-1).numpy()
-                arv = np.var(A-P)/np.var(A)
+                arv = compute_arv(A,P)
                 loss.backward()
                 opt_single.step()
             print(f" loss = {loss:.4f}; ARV = {arv:.3f}")
@@ -238,29 +251,22 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
         model_single.eval()
         with torch.no_grad():
             nn1_preds[base] = model_single(test_inputs).cpu().numpy()
-            # Denormalize predictions
-            scaler_targets.min_ = scaler_targets.min_[:1]
-            scaler_targets.scale_ = scaler_targets.scale_[:1]
-            nn1_preds[base] = scaler_targets.inverse_transform(nn1_preds[base].reshape(-1,1))
+        # Denormalize predictions
+    nn1_preds_combine = np.column_stack([nn1_preds[base] for base in output_bases])
+    nn1_preds_descale = scaler_targets.inverse_transform(nn1_preds_combine)
+    for idx, base in enumerate(output_bases):
+        nn1_preds[base] = nn1_preds_descale[:, idx]
 
     # Linear Regression as a baseline
     print(f"{indent}Performing linear regression")
     lr_model = LinearRegression()
     lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
-    import pdb; pdb.set_trace()
-    #(Pdb) train_df[outputs].shape
-    #(38250, 3)
-    #(Pdb) lr_preds.shape
-    #(63578, 3)
-    for c in range(lr_preds.shape[1]):
-        A = train_df[outputs].values[:, c]
-        P = lr_preds[:, c]
-        arv = np.var(A - P) / np.var(A) if np.var(A) > 0 else 0
-        arvs.append(arv)
-        print(f" | {base} ARV = {arv:.3f}", end='')
+    arvs = compute_arv(test_df[outputs].values, lr_preds)
+    for base, arv in zip(output_bases, arvs):
+        print(f"| {base} ARV = {arv:.3f}", end='')
 
-    import pdb; pdb.set_trace()
+  #  import pdb; pdb.set_trace()
     model_types = ['nn3', 'nn1', 'lr']
     results_dict = {
         'timestamp': test_df['datetime'].values,
