@@ -17,8 +17,7 @@ from sklearn.preprocessing import MinMaxScaler
 data_directory = "./data/"
 start = time.time()
 
-ny = 2              # Number of years to use; Use 'All' for all years
-num_epochs = 2    # Number of epochs
+ny = 2             # Number of years to use; Use 'All' for all years
 num_epochs = 2    # Number of epochs
 num_boot_reps = 1   # Number of bootstrap repetitions
 
@@ -35,7 +34,7 @@ else:
 
 # Define inputs and outputs
 all_input_model = True
-leave_outs = ["r[km]", "theta[deg]"]   # ["r[km]", "theta[deg]", etc.] or None
+leave_outs = None#["r[km]", "theta[deg]"]   # ["r[km]", "theta[deg]", etc.] or None
 inputs = ["r[km]", "theta[deg]", "phi[deg]", "vsw[km/s]", "ey[mV/m]", "imfbz[nT]", "nsw[1/cm^3]"]
 outputs = ["bx[nT]", "by[nT]", "bz[nT]"]
 output_bases = [output.split('[')[0] for output in outputs]
@@ -53,6 +52,8 @@ elif torch.cuda.is_available():
     device = torch.device("cuda")   # Use CUDA on Windows/Linux
 else:
     device = torch.device("cpu")    # CPU Fallback
+
+device = torch.device("cpu")    # CPU Fallback
 print(f"Using device: {device}")
 
 # Define directories to save plots and results
@@ -264,8 +265,9 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
     lr_preds = lr_model.predict(test_df[current_inputs])
     arvs = compute_arv(test_df[outputs].values, lr_preds)
     for base, arv in zip(output_bases, arvs):
-        print(f"| {base} ARV = {arv:.3f}", end='')
+        print(f"{2*indent}| {base} ARV = {arv:.3f}", end='')
 
+    print()
   #  import pdb; pdb.set_trace()
     model_types = ['nn3', 'nn1', 'lr']
     results_dict = {
@@ -285,7 +287,7 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
                 results_dict[f'{base}_{model}'] = lr_preds[:, output_bases.index(base)].flatten()
 
     rep_results = pd.DataFrame(results_dict)
-    print(rep_results)
+    #print(rep_results)
 
     return rep_results
 
