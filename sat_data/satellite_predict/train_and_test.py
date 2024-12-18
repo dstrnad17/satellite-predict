@@ -17,7 +17,7 @@ import pandas as pd
 print("Done")
 
 from .arv import arv
-from .table import table
+from .summary import table
 
 def train_and_test(combined_dfs, **kwargs):
 
@@ -105,6 +105,7 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
     lr = kwargs.get('lr', 0.0006)
     inputs = kwargs.get('inputs', None)
     outputs = kwargs.get('outputs', None)
+    models = kwargs.get('models', ['ols', 'nn1'])
     num_epochs = kwargs.get('num_epochs', 2)
     batch_size = kwargs.get('batch_size', 256)
     device_name = kwargs.get('device')
@@ -147,92 +148,99 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
     results['actual'] = pd.DataFrame(results['actual'])
 
     for model in kwargs['models']:
-      results[model] = pd.DataFrame({'timestamp': test_df['datetime'].values})
+      results[model] = {}
+      if model != 'ols':
+        results[model]['epochs'] = []
+      results[model]['predicted'] = pd.DataFrame({'timestamp': test_df['datetime'].values})
 
-    # Linear regression
-    print(f"{indent}Performing linear regression")
-    lr_model = LinearRegression()
-    lr_model.fit(train_df[current_inputs], train_df[outputs])
-    lr_preds = lr_model.predict(test_df[current_inputs])
-    arvs = arv(test_df[outputs].values, lr_preds)
-    print(indent + 2*"             ", end='')
-    for output, _arv in zip(outputs, arvs):
-        print(f" | {output} ARV = {_arv:6.3f}", end='')
-    print()
-
-    # create dataframe with timestamps and output
-    results['ols'][outputs] = lr_preds
-
-    # Multi-output neural network
-    model_multi = SatNet(num_inputs=num_inputs).to(device)
-    opt_multi = torch.optim.Adam(model_multi.parameters(), lr)
-
-    print(f"{indent}Training multi-output neural network")
-    for epoch in range(num_epochs):
-      print(f"{indent}  Epoch {epoch + 1}/{num_epochs}", end='')
-      total_loss = 0
-      all_predictions = []
-      all_targets = []
-
-      tds = TensorDataset(train_inputs, train_targets)
-      for data, target in DataLoader(tds, batch_size=batch_size, shuffle=True):
-        opt_multi.zero_grad()
-        predictions = model_multi(data)
-        loss = nn.MSELoss()(predictions, target)
-        loss.backward()
-        opt_multi.step()
-        total_loss += loss.item()
-
-        # Collect all predictions and targets for ARV calculation
-        all_predictions.append(predictions.detach().cpu().numpy())
-        all_targets.append(target.cpu().numpy())
-
-      # Compute ARV for each output
-      all_predictions = np.vstack(all_predictions)
-      all_targets = np.vstack(all_targets)
-      arvs = arv(all_predictions, all_targets)
-      print(f" loss = {total_loss:7.4f}", end='')
+    if 'ols' in models:
+      # Linear regression
+      print(f"{indent}Performing linear regression")
+      lr_model = LinearRegression()
+      lr_model.fit(train_df[current_inputs], train_df[outputs])
+      lr_preds = lr_model.predict(test_df[current_inputs])
+      arvs = arv(test_df[outputs].values, lr_preds)
+      print(indent, end='')
       for output, _arv in zip(outputs, arvs):
-        print(f" | {output} ARV = {_arv:6.3f}", end='')
-      print()
+          print(f" | {output} ARV = {_arv:6.3f}", end='')
+      results['ols']['predicted'][outputs] = lr_preds
 
-    model_multi.eval()
+    if 'nn3' in models:
+      # TODO: This need to be generalized to be named mimo
+      # Multi-output neural network
+      model_multi = SatNet(num_inputs=num_inputs).to(device)
+      opt_multi = torch.optim.Adam(model_multi.parameters(), lr)
 
-    with torch.no_grad():
-      nn3_preds = model_multi(test_inputs).cpu().numpy()  # Multi-output NN predictions
-      # Denormalize predictions
-      nn3_preds = scaler_targets.inverse_transform(nn3_preds)
-      results['nn3'][outputs] = nn3_preds
-
-    # Single-output neural networks
-    print(f"{indent}Training single-output neural networks")
-    nn1_preds = {}
-    for output in outputs:
-      model_single = SatNet(num_inputs=len(current_inputs), single_output=True).to(device)
-      opt_single = torch.optim.Adam(model_single.parameters(), lr)
-      print(f"{indent}  Training {output} neural network")
+      print(f"\n{indent}Training multi-output neural network")
       for epoch in range(num_epochs):
-        print(f"{indent}    Epoch {epoch + 1}/{num_epochs}", end='')
-        target_index = outputs.index(output)
-        tds = TensorDataset(train_inputs, train_targets[:, target_index:target_index+1])
+        print(f"{indent}  Epoch {epoch + 1}/{num_epochs}", end='')
+        total_loss = 0
+        all_predictions = []
+        all_targets = []
+
+        tds = TensorDataset(train_inputs, train_targets)
         for data, target in DataLoader(tds, batch_size=batch_size, shuffle=True):
-          opt_single.zero_grad()
-          loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
-          A = model_single(data).detach().cpu().squeeze(-1).numpy()
-          P = target.detach().cpu().squeeze(-1).numpy()
-          _arv = arv(A,P)
+          opt_multi.zero_grad()
+          predictions = model_multi(data)
+          loss = nn.MSELoss()(predictions, target)
           loss.backward()
-          opt_single.step()
-        print(f" {output} loss = {loss:7.4f} | ARV = {_arv:6.3f}")
+          opt_multi.step()
+          total_loss += loss.item()
 
-      model_single.eval()
+          # Collect all predictions and targets for ARV calculation
+          all_predictions.append(predictions.detach().cpu().numpy())
+          all_targets.append(target.cpu().numpy())
+
+        # Compute ARV for each output
+        all_predictions = np.vstack(all_predictions)
+        all_targets = np.vstack(all_targets)
+        arvs = arv(all_predictions, all_targets)
+        results[model]['epochs'].append(arvs)
+        print(f" loss = {total_loss:7.4f}", end='')
+        for output, _arv in zip(outputs, arvs):
+          print(f" | {output} ARV = {_arv:6.3f}", end='')
+        print()
+
+      model_multi.eval()
+
       with torch.no_grad():
-        nn1_preds[output] = model_single(test_inputs).cpu().numpy()
+        nn3_preds = model_multi(test_inputs).cpu().numpy()  # Multi-output NN predictions
+        # Denormalize predictions
+        nn3_preds = scaler_targets.inverse_transform(nn3_preds)
+        results['nn3']['predicted'][outputs] = nn3_preds
 
-    # Denormalize predictions
-    nn1_preds_combine = np.column_stack([nn1_preds[output] for output in outputs])
-    nn1_preds = scaler_targets.inverse_transform(nn1_preds_combine)
-    results['nn1'][outputs] = nn1_preds
+    if 'nn1' in models:
+      # TODO: Rename to miso
+      # Single-output neural networks
+      arv_epochs['nn1'] = []
+      print(f"\n{indent}Training single-output neural networks w/ input '{removed_input}' removed")
+      nn1_preds = {}
+      for output in outputs:
+        model_single = SatNet(num_inputs=len(current_inputs), single_output=True).to(device)
+        opt_single = torch.optim.Adam(model_single.parameters(), lr)
+        print(f"{indent}  Training {output} neural network")
+        for epoch in range(num_epochs):
+          print(f"{indent}    Epoch {epoch + 1}/{num_epochs}", end='')
+          target_index = outputs.index(output)
+          tds = TensorDataset(train_inputs, train_targets[:, target_index:target_index+1])
+          for data, target in DataLoader(tds, batch_size=batch_size, shuffle=True):
+            opt_single.zero_grad()
+            loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
+            A = model_single(data).detach().cpu().squeeze(-1).numpy()
+            P = target.detach().cpu().squeeze(-1).numpy()
+            _arv = arv(A,P)
+            loss.backward()
+            opt_single.step()
+          print(f" {output} loss = {loss:7.4f} | ARV = {_arv:6.3f}")
+
+        model_single.eval()
+        with torch.no_grad():
+          nn1_preds[output] = model_single(test_inputs).cpu().numpy()
+
+      # Denormalize predictions
+      nn1_preds_combine = np.column_stack([nn1_preds[output] for output in outputs])
+      nn1_preds = scaler_targets.inverse_transform(nn1_preds_combine)
+      results['nn1'][outputs] = nn1_preds
 
     return results
 

@@ -1,20 +1,20 @@
-from satellite_predict.train_and_test import train_and_test
-
 # This will be the main interface to the program. User provides kwargs
 # and a program to return combined_dfs.
+tag = "cluster1"
 kwargs = {
     "config": {
-      "n_df": 2, # Num. of DataFrames for data_load to return. None => all DataFrames.
+      "n_df": 6, # Num. of DataFrames for data_load to return. None => all DataFrames.
       "data_directory": "./data",
-      "file_pattern": "cluster1*.pkl"
+      "file_pattern": f"{tag}*.pkl"
     },
-    "tag": "cluster1",
-    "num_epochs": 1,
-    "num_boot_reps": 2,
+    "tag": tag,
+    "num_epochs": 1000,
+    "num_boot_reps": 1,
     "batch_size": 256,
-    "lr": 0.0006,
+    "lr": 0.001,
     "removed_inputs": [None, "r[km]"],
-    "models": ["ols", "nn1", "nn3"],
+    "models": ["ols", "nn3"],
+    #"models": ["ols"],
     "inputs": ["r[km]", "theta[deg]", "phi[deg]", "vsw[km/s]", "ey[mV/m]", "imfbz[nT]", "nsw[1/cm^3]"],
     "outputs": ["bx[nT]", "by[nT]", "bz[nT]"],
     "results_dir": None,
@@ -23,9 +23,11 @@ kwargs = {
     "parallel": False
 }
 
-#from satellite_predict.table import table
-#table(**kwargs)
-#exit()
+from satellite_predict.summary import summary
+summary(**kwargs)
+exit()
+
+from satellite_predict.train_and_test import train_and_test
 
 def data_load(**config):
     import os
@@ -48,7 +50,7 @@ def data_load(**config):
     position_sph = ["r[km]", "theta[deg]", "phi[deg]"]
 
     fglob = os.path.join(config['data_directory'], config['file_pattern'])
-    files = glob.glob(fglob)
+    files = sorted(glob.glob(fglob))
 
     dataframes = []
     n_r = 0 # Number of DataFrames read
