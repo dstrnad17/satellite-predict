@@ -66,8 +66,8 @@ class SatNet(nn.Module):
         self.output_index = output_index  # Index to select bx, by, bz
         self.network = nn.Sequential(
             nn.Linear(num_inputs, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, 1 if single_output else 3)  # Single or three outputs
+            nn.Linear(hidden_size, 1 if single_output else 3),  # Single or three outputs
+            nn.ReLU()
         )
 
     def forward(self, x):
@@ -98,7 +98,7 @@ def compute_arv(A, P):
     arvs = []
     for i in range(A.shape[1]):
         var_A = np.var(A[:, i])
-        arv = np.var(A[:, i] - P[:, i]) / var_A if var_A > 0 else 0
+        arv = np.var(A[:, i] - P[:, i]) / var_A if var_A > 0 else np.nan
         arvs.append(arv)
     
     return arvs if len(arvs) > 1 else arvs[0]
@@ -159,28 +159,65 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
         # Save the results after all repetitions are completed
         save_results(results, file_pattern, removed_input, results_directory, method=method_label)
 
+# Generic function to train the model (multi-output or single-output)
+def train_model(model, train_inputs, train_targets, opt, single_output=False):
+    model.train()
+    total_loss = 0
+    all_predictions = []
+    all_targets = []
+
+    data_loader = DataLoader(TensorDataset(train_inputs, train_targets), batch_size=batch_size, shuffle=True)
+
+    for data, target in data_loader:
+        data, target = data.to(device), target.to(device)
+        
+        opt.zero_grad()
+        predictions = model(data)
+        loss = nn.MSELoss()(predictions, target)
+        loss.backward()
+        opt.step()
+        total_loss += loss.item()
+
+        all_predictions.append(predictions.detach().cpu().numpy())
+        all_targets.append(target.cpu().numpy())
+
+    if single_output:
+        all_predictions = np.concatenate(all_predictions).squeeze()
+        all_targets = np.concatenate(all_targets).squeeze()
+        arvs = compute_arv(all_targets, all_predictions)
+        print(f" loss = {total_loss:.4f}; ARV = {arvs:.3f}")
+    else:
+        all_predictions = np.vstack(all_predictions)
+        all_targets = np.vstack(all_targets)
+        arvs = compute_arv(all_targets, all_predictions)
+        for base, arv in zip(outputs, arvs):
+            print(f" | {base} ARV = {arv:.3f}", end='')
+        print(f" loss = {total_loss:.4f}")
+
+    return total_loss, all_predictions, all_targets, arvs
+
 # Helper function to process a single training/testing repetition
 def process_single_rep(train_df, test_df, inputs, removed_input=None):
-    indent = "      "
 
+    indent = "      "
+    
     # Determine the current input features
     current_inputs = [inp for inp in inputs if inp != removed_input] if removed_input else inputs
     num_inputs = len(current_inputs)
 
-    # Fill missing values
+    # Fill missing values and normalize
     train_df.fillna(train_df.mean(numeric_only=True), inplace=True)
     test_df.fillna(test_df.mean(numeric_only=True), inplace=True)
-
-    # Normalize the data
+    
     scaler_inputs = MinMaxScaler()
     scaler_targets = MinMaxScaler()
 
     train_inputs_scaled = pd.DataFrame(scaler_inputs.fit_transform(train_df[current_inputs]), 
-                                    columns=current_inputs, index=train_df.index)
+                                       columns=current_inputs, index=train_df.index)
     train_targets_scaled = pd.DataFrame(scaler_targets.fit_transform(train_df[outputs]), 
-                                    columns=outputs, index=train_df.index)
+                                        columns=outputs, index=train_df.index)
     test_inputs_scaled = pd.DataFrame(scaler_inputs.transform(test_df[current_inputs]), 
-                                    columns=current_inputs, index=test_df.index)
+                                      columns=current_inputs, index=test_df.index)
 
     # Convert data to tensors
     train_inputs = torch.tensor(train_inputs_scaled.values, dtype=torch.float32).to(device)
@@ -195,64 +232,35 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
     print(f"{indent}Training multi-output neural network")
     for epoch in range(num_epochs):
         print(f"{indent}  Epoch {epoch + 1}/{num_epochs}", end='')
-        total_loss = 0
-        all_predictions = []
-        all_targets = []
-        
-        for data, target in DataLoader(TensorDataset(train_inputs, train_targets), batch_size=batch_size, shuffle=True):
-            opt_multi.zero_grad()
-            predictions = model_multi(data)
-            loss = nn.MSELoss()(predictions, target)
-            loss.backward()
-            opt_multi.step()
-            total_loss += loss.item()
-            
-            # Collect all predictions and targets for ARV calculation
-            all_predictions.append(predictions.detach().cpu().numpy())
-            all_targets.append(target.cpu().numpy())
-        
-        # Compute ARV for each output
-        all_predictions = np.vstack(all_predictions)
-        all_targets = np.vstack(all_targets)
-        arvs = compute_arv(all_predictions, all_targets)
-        for base, arv in zip(output_bases, arvs):
-            print(f" | {base} ARV = {arv:.3f}", end='')
-        print(f" loss = {total_loss:.4f}")
+        train_model(model_multi, train_inputs, train_targets, opt_multi, single_output=False) #### NEW FUNCTION
 
+    # Test the multi-output model
     model_multi.eval()
     with torch.no_grad():
-        nn3_preds = model_multi(test_inputs).cpu().numpy()  # Multi-output NN predictions
-        # Denormalize predictions
+        nn3_preds = model_multi(test_inputs).cpu().numpy()
         nn3_preds = scaler_targets.inverse_transform(nn3_preds)
 
     # Single-output neural networks
-    print(f"{indent}Training single-output neural networks")
     nn1_preds = {}
-    for base in output_bases:
+    print(f"{indent}Training single-output neural networks")
+    for base in outputs:
         model_single = SatNet(num_inputs=len(current_inputs), single_output=True).to(device)
         opt_single = torch.optim.Adam(model_single.parameters(), lr)
         print(f"{indent}  Training {base} neural network")
 
         for epoch in range(num_epochs):
             print(f"{indent}    Epoch {epoch + 1}/{num_epochs}", end='')
-            target_index = output_bases.index(base)
-            for data, target in DataLoader(TensorDataset(train_inputs, train_targets[:, target_index:target_index+1]), batch_size=batch_size, shuffle=True):
-                opt_single.zero_grad()
-                loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
-                A = model_single(data).detach().cpu().squeeze(-1).numpy()
-                P = target.detach().cpu().squeeze(-1).numpy()
-                arv = compute_arv(A,P)
-                loss.backward()
-                opt_single.step()
-            print(f" loss = {loss:.4f}; ARV = {arv:.3f}")
+            target_index = outputs.index(base)
+            train_model(model_single, train_inputs, train_targets[:, target_index:target_index + 1], opt_single, single_output=True)
 
         model_single.eval()
         with torch.no_grad():
             nn1_preds[base] = model_single(test_inputs).cpu().numpy()
-        # Denormalize predictions
-    nn1_preds_combine = np.column_stack([nn1_preds[base] for base in output_bases])
+
+    # Denormalize predictions for single-output models
+    nn1_preds_combine = np.column_stack([nn1_preds[base] for base in outputs])
     nn1_preds_descale = scaler_targets.inverse_transform(nn1_preds_combine)
-    for idx, base in enumerate(output_bases):
+    for idx, base in enumerate(outputs):
         nn1_preds[base] = nn1_preds_descale[:, idx]
 
     # Linear Regression as a baseline
@@ -261,26 +269,26 @@ def process_single_rep(train_df, test_df, inputs, removed_input=None):
     lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
     arvs = compute_arv(test_df[outputs].values, lr_preds)
-    for base, arv in zip(output_bases, arvs):
+    for base, arv in zip(outputs, arvs):
         print(f"| {base} ARV = {arv:.3f}", end='')
 
-  #  import pdb; pdb.set_trace()
+    # Compile results
     model_types = ['nn3', 'nn1', 'lr']
     results_dict = {
         'timestamp': test_df['datetime'].values,
     }
 
-    for base in output_bases:
-        results_dict[f'{base}_actual'] = test_targets[:, output_bases.index(base)].cpu().numpy()
-        
+    for base in outputs:
+        results_dict[f'{base}_actual'] = test_targets[:, outputs.index(base)].cpu().numpy()
+
     for model in model_types:
-        for base in output_bases:
+        for base in outputs:
             if model == 'nn3':
-                results_dict[f'{base}_{model}'] = nn3_preds[:, output_bases.index(base)].flatten()
+                results_dict[f'{base}_{model}'] = nn3_preds[:, outputs.index(base)].flatten()
             elif model == 'nn1':
                 results_dict[f'{base}_{model}'] = nn1_preds[base].flatten()
             elif model == 'lr':
-                results_dict[f'{base}_{model}'] = lr_preds[:, output_bases.index(base)].flatten()
+                results_dict[f'{base}_{model}'] = lr_preds[:, outputs.index(base)].flatten()
 
     rep_results = pd.DataFrame(results_dict)
     print(rep_results)
