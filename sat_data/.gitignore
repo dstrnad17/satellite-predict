@@ -1,0 +1,5 @@
+__pycache__/
+satellite_predict.egg-info/
+main_results/
+results/
+data/
