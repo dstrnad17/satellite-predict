@@ -1,4 +1,5 @@
 import os
+import json
 
 import pandas as pd
 
@@ -6,20 +7,29 @@ from .plot import plot
 from .table import table
 from .stats import stats
 
-def summary(**kwargs):
+def summary(tag, results_dir=None):
 
-  tag = kwargs['tag']
+  if results_dir is None:
+    results_dir = './results'
 
-  directory = kwargs.get('results_directory', './results')
-  directory = os.path.join(directory, tag)
+  config_path = os.path.join(results_dir, tag, 'config.json')
+  print(f"Reading: {config_path}")
+  with open(config_path, 'r') as f:
+    kwargs = json.load(f)
+
+  directory = os.path.join(kwargs['results_dir'], tag)
 
   _stats = {}
 
   # Iterate through subdirectories under each pattern
-  for removed_input in os.listdir(directory):
+  for removed_input in kwargs['removed_inputs']:
+    if removed_input is None:
+      removed_input = 'None'
+
     removed_input_dir = os.path.join(directory, removed_input)
 
     if not os.path.isdir(removed_input_dir):
+      print("    Removed input dir '{removed_input_dir}' not found. Skipping.")
       continue
 
     print(f"    Processing removed input dir: {removed_input_dir}")

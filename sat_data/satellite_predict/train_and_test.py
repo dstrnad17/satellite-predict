@@ -1,4 +1,5 @@
 import os
+import json
 
 print("Importing torch. ", end="")
 import torch
@@ -17,20 +18,51 @@ import pandas as pd
 print("Done")
 
 from .arv import arv
-from .summary import table
+from .summary import summary
 
-def train_and_test(combined_dfs, **kwargs):
+def prep_config(conf):
+  defaults = {
+    'tag': 'tag1',
+    'lr': 0.001,
+    'models': ['ols', 'nn3'],
+    'device': None,
+    'num_epochs': 200,
+    'batch_size': 256,
+    'results_dir': './results',
+    'num_boot_reps': 1
+  }
+  for key in defaults.keys():
+    if key not in conf or conf[key] is None:
+      conf[key] = defaults[key]
 
-  tag = kwargs.get('tag', 'tag1')
-  num_boot_reps = kwargs.get('num_boot_reps', 1)
-  removed_inputs = kwargs.get('removed_inputs', [None])
-  results_directory = kwargs.get('results_directory', './results/')
+  removed_inputs = conf['removed_inputs']
+  if removed_inputs is None:
+    removed_inputs = [None]
+  if removed_inputs is True:
+    removed_inputs = [None] + conf['inputs']
+  conf['removed_inputs'] = removed_inputs
 
-  print(f"{tag} started")
+  config_file = os.path.join(conf['results_dir'], conf['tag'], 'config.json')
+  print(f"Writing: {config_file}")
+  if not os.path.exists(os.path.dirname(config_file)):
+    os.makedirs(os.path.dirname(config_file))
+
+  json.dump(conf, open(config_file, 'w'))
+
+  return conf
+
+def train_and_test(combined_dfs, conf, parallel_jobs=False):
+
+  """
+  """
+
+  conf = prep_config(conf)
+
+  print(f"{conf['tag']} started")
   is_loo = len(combined_dfs) > 1  # Check if leave-one-out is needed
   datasets = combined_dfs if is_loo else [combined_dfs[0]]
 
-  for removed_input in removed_inputs:
+  for removed_input in conf['removed_inputs']:
     print(f"  Removed input: {removed_input}")
     for i, test_data in enumerate(datasets):
       if is_loo:
@@ -46,19 +78,19 @@ def train_and_test(combined_dfs, **kwargs):
 
       # Loop for bootstrap repetitions
       results = []
-      for rep in range(num_boot_reps):
-        print(f"        Bootstrap repetition {rep + 1}/{num_boot_reps}")
+      for rep in range(conf['num_boot_reps']):
+        print(f"        Bootstrap repetition {rep + 1}/{conf['num_boot_reps']}")
         train_boot = train_data.sample(frac=0.8, random_state=rep)
         test_data = datasets[i] if is_loo else datasets[0]  # Test data comes from the current fold
-        result = process_single_rep(train_boot, test_data, removed_input=removed_input, **kwargs)
+        result = process_single_rep(train_boot, test_data, removed_input=removed_input, **conf)
         results.append(result)
 
-      save(results, tag, removed_input, results_directory, method=method_label)
+      save(results, conf['tag'], removed_input, conf['results_dir'], method=method_label)
 
-  print("  Creating tables")
-  table(**kwargs)
+  print("  Creating tables and plots")
+  summary(conf['tag'], results_dir=conf['results_dir'])
 
-  print(f"{tag} finished\n")
+  print(f"{conf['tag']} finished\n")
 
 
 def _device(device_name):
@@ -102,13 +134,13 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
 
     indent = "          "
 
-    lr = kwargs.get('lr', 0.0006)
-    inputs = kwargs.get('inputs', None)
-    outputs = kwargs.get('outputs', None)
-    models = kwargs.get('models', ['ols', 'nn1'])
-    num_epochs = kwargs.get('num_epochs', 2)
-    batch_size = kwargs.get('batch_size', 256)
-    device_name = kwargs.get('device')
+    lr = kwargs['lr']
+    inputs = kwargs['inputs']
+    outputs = kwargs['outputs']
+    models = kwargs['models']
+    num_epochs = kwargs['num_epochs']
+    batch_size = kwargs['batch_size']
+    device_name = kwargs['device']
     device = _device(device_name)
 
     if device is None:
@@ -194,7 +226,7 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
         # Compute ARV for each output
         all_predictions = np.vstack(all_predictions)
         all_targets = np.vstack(all_targets)
-        arvs = arv(all_predictions, all_targets)
+        arvs = arv(all_targets, all_predictions)
         results[model]['epochs'].append(arvs)
         print(f" loss = {total_loss:7.4f}", end='')
         for output, _arv in zip(outputs, arvs):
@@ -212,7 +244,6 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
     if 'nn1' in models:
       # TODO: Rename to miso
       # Single-output neural networks
-      arv_epochs['nn1'] = []
       print(f"\n{indent}Training single-output neural networks w/ input '{removed_input}' removed")
       nn1_preds = {}
       for output in outputs:
@@ -226,8 +257,8 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
           for data, target in DataLoader(tds, batch_size=batch_size, shuffle=True):
             opt_single.zero_grad()
             loss = nn.MSELoss()(model_single(data), target.squeeze(-1))
-            A = model_single(data).detach().cpu().squeeze(-1).numpy()
-            P = target.detach().cpu().squeeze(-1).numpy()
+            P = model_single(data).detach().cpu().squeeze(-1).numpy()
+            A = target.detach().cpu().squeeze(-1).numpy()
             _arv = arv(A,P)
             loss.backward()
             opt_single.step()
@@ -257,7 +288,7 @@ def save(results_dict, tag, removed_input, results_directory, method):
     #   df is a DataFrame with columns of timestamp and outputs
 
     if removed_input is None:
-      removed_input = 'none'
+      removed_input = 'None'
 
     subdir = os.path.join(results_directory, tag, removed_input)
     if method.startswith('loo'):

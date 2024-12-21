@@ -37,7 +37,7 @@ def plot(boots, save_path, stats):
 
     if 'epochs' in boots[boot_num][model]:
       plt.figure(figsize=(8.5, 8.5), facecolor='white')
-      plt.plot(boots[boot_num][model]['epochs'])
+      plt.semilogy(boots[boot_num][model]['epochs'])
       plt.grid(True)
       plt.ylabel('ARV')
       plt.xlabel('Epoch')
