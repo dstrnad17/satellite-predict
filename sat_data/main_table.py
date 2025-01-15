@@ -16,11 +16,11 @@ else:
 
 # List of columns to calculate mean, std dev, and RMSE
 preds = {
-    'nn3': ['bx_nn3', 'by_nn3', 'bz_nn3'],
-    'nn1': ['bx_nn1', 'by_nn1', 'bz_nn1'],
-    'lr': ['bx_lr', 'by_lr', 'bz_lr']
+    'nn3': ['bx[nT]_nn3', 'by[nT]_nn3', 'bz[nT]_nn3'],
+    'nn1': ['bx[nT]_nn1', 'by[nT]_nn1', 'bz[nT]_nn1'],
+    'lr': ['bx[nT]_lr', 'by[nT]_lr', 'bz[nT]_lr']
 }
-actual = ['bx_actual', 'by_actual', 'bz_actual']
+actual = ['bx[nT]_actual', 'by[nT]_actual', 'bz[nT]_actual']
 
 # Function to compute average relative variance (ARV), this function appears in each program
 def compute_arv(A, P):
@@ -84,6 +84,7 @@ for directory_name in satellite_list:
             # After all files for this removed_input are processed, concatenate the data
             if removed_input in data_input:
                 total_data = pd.concat(data_input[removed_input], ignore_index=True)
+                print("Columns in total_data:", total_data.columns)
 
                 # Calculate the mean and std deviation after concatenation (averaging over reps)
                 avg_df = total_data.mean(axis=0)
