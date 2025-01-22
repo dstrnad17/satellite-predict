@@ -1,5 +1,5 @@
-test_run = False # For debugging code
-parallel_jobs = True # Do jobs in parallel
+test_run = True # For debugging code
+parallel_jobs = False # Do jobs in parallel
 
 tag = "cluster1"
 
@@ -53,7 +53,7 @@ satellites = [
 if test_run:
   satellites = satellites[0:2]
   conf['data']['n_df'] = 2
-  conf['num_epochs'] = 2
+  conf['num_epochs'] = 5
   conf['num_boot_reps'] = 1
   conf['removed_inputs'] = [None, "r"]
 
@@ -62,7 +62,7 @@ if False:
   summary(tag, results_dir=conf['results_dir'])
   exit()
 
-from satellite_predict.train_and_test import train_and_test
+from satellite_predict.train_and_test2 import train_and_test
 
 def data_load(**config):
     import os
