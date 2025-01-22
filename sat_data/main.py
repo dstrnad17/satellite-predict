@@ -18,12 +18,12 @@ data_directory = "./data/"
 start = time.time()
 
 ny = 2              # Number of years to use; Use 'All' for all years
-num_epochs = 2    # Number of epochs
+num_epochs = 3      # Number of epochs
 num_boot_reps = 1   # Number of bootstrap repetitions
 
 parallel = False     # Parallel processing
 batch_size = 256
-lr = 0.0006         # Learning rate
+lr = 0.006           # Learning rate
 print(f"Batch Size = {batch_size}, Learning Rate = {lr}")
 
 all_patterns = False
@@ -60,20 +60,16 @@ if not os.path.exists(results_directory):
 
 # Define neural network
 class SatNet(nn.Module):
-    def __init__(self, num_inputs, hidden_size=32, single_output=False, output_index=None):
+    def __init__(self, num_inputs, num_outputs, hidden_size=32):
         super().__init__()
-        self.single_output = single_output
-        self.output_index = output_index  # Index to select bx, by, bz
         self.network = nn.Sequential(
             nn.Linear(num_inputs, hidden_size),
-            nn.Linear(hidden_size, 1 if single_output else 3),  # Single or three outputs
-            nn.ReLU()
+            nn.Tanh(),
+            nn.Linear(hidden_size, num_outputs),  # Single or multiple outputs
         )
 
     def forward(self, x):
         output = self.network(x)
-        if self.single_output:
-            return output.squeeze(-1)  # Return a single output if single_output=True
         return output
 
 # Function to convert Cartesian to spherical coordinates
@@ -93,7 +89,9 @@ def compute_arv(A, P):
         P = P.to_numpy()
 
     if A.ndim == 1:
-        A, P = np.expand_dims(A, axis=1), np.expand_dims(P, axis=1)
+        A = A[:, np.newaxis]
+    if P.ndim == 1:
+        P = P[:, np.newaxis]
 
     arvs = []
     for i in range(A.shape[1]):
@@ -101,7 +99,7 @@ def compute_arv(A, P):
         arv = np.var(A[:, i] - P[:, i]) / var_A if var_A > 0 else np.nan
         arvs.append(arv)
     
-    return arvs if len(arvs) > 1 else arvs[0]
+    return arvs
 
 # Function to load and preprocess data
 def data_load(data_directory, file_pattern, position_cart, position_sph):
@@ -153,14 +151,14 @@ def train_and_test(combined_dfs, file_pattern, **kwargs):
             print(f"    Repetition {rep + 1}/{num_boot_reps} started at {time.time()-start}")
             train_boot = train_data.sample(frac=0.8, random_state=rep)
             test_data = datasets[i] if is_loo else datasets[0]  # Test data comes from the current fold
-            rep_results = process_single_rep(train_boot, test_data, inputs, removed_input=removed_input)
+            rep_results = process_single_rep(train_boot, test_data, inputs, outputs, removed_input=removed_input)
             results[f'rep_{rep + 1}'] = rep_results
 
         # Save the results after all repetitions are completed
         save_results(results, file_pattern, removed_input, results_directory, method=method_label)
 
 # Generic function to train the model (multi-output or single-output)
-def train_model(model, train_inputs, train_targets, opt, single_output=False):
+def train_model(model, train_inputs, train_targets, opt, outputs):
     model.train()
     total_loss = 0
     all_predictions = []
@@ -173,6 +171,8 @@ def train_model(model, train_inputs, train_targets, opt, single_output=False):
         
         opt.zero_grad()
         predictions = model(data)
+
+        # Compute the loss for multi-output
         loss = nn.MSELoss()(predictions, target)
         loss.backward()
         opt.step()
@@ -181,119 +181,99 @@ def train_model(model, train_inputs, train_targets, opt, single_output=False):
         all_predictions.append(predictions.detach().cpu().numpy())
         all_targets.append(target.cpu().numpy())
 
-    if single_output:
-        all_predictions = np.concatenate(all_predictions).squeeze()
-        all_targets = np.concatenate(all_targets).squeeze()
-        arvs = compute_arv(all_targets, all_predictions)
-        print(f" loss = {total_loss:.4f}; ARV = {arvs:.3f}")
-    else:
-        all_predictions = np.vstack(all_predictions)
-        all_targets = np.vstack(all_targets)
-        arvs = compute_arv(all_targets, all_predictions)
-        for base, arv in zip(outputs, arvs):
-            print(f" | {base} ARV = {arv:.3f}", end='')
-        print(f" loss = {total_loss:.4f}")
+    # Concatenate predictions and targets
+    all_predictions = np.concatenate(all_predictions, axis=0)
+    all_targets = np.concatenate(all_targets, axis=0)
+
+    # Compute and print ARV/loss
+    arvs = compute_arv(all_targets, all_predictions)
+    for base, arv in zip(outputs, arvs):
+        print(f" | {base} ARV = {arv:.3f}", end='')
+    print(f" loss = {total_loss:.4f}")
 
     return total_loss, all_predictions, all_targets, arvs
 
-# Helper function to process a single training/testing repetition
-def process_single_rep(train_df, test_df, inputs, removed_input=None):
-
+def process_single_rep(train_df, test_df, inputs, outputs, removed_input=None):
     indent = "      "
-    
-    # Determine the current input features
+
     current_inputs = [inp for inp in inputs if inp != removed_input] if removed_input else inputs
-    num_inputs = len(current_inputs)
 
     # Fill missing values and normalize
     train_df.fillna(train_df.mean(numeric_only=True), inplace=True)
     test_df.fillna(test_df.mean(numeric_only=True), inplace=True)
-    
+
     scaler_inputs = MinMaxScaler()
     scaler_targets = MinMaxScaler()
 
-    train_inputs_scaled = pd.DataFrame(scaler_inputs.fit_transform(train_df[current_inputs]), 
-                                       columns=current_inputs, index=train_df.index)
-    train_targets_scaled = pd.DataFrame(scaler_targets.fit_transform(train_df[outputs]), 
-                                        columns=outputs, index=train_df.index)
-    test_inputs_scaled = pd.DataFrame(scaler_inputs.transform(test_df[current_inputs]), 
-                                      columns=current_inputs, index=test_df.index)
+    train_inputs_scaled = scaler_inputs.fit_transform(train_df[current_inputs])
+    train_targets_scaled = scaler_targets.fit_transform(train_df[outputs])
+    test_inputs_scaled = scaler_inputs.transform(test_df[current_inputs])
+    test_targets = test_df[outputs].values
 
-    # Convert data to tensors
-    train_inputs = torch.tensor(train_inputs_scaled.values, dtype=torch.float32).to(device)
-    train_targets = torch.tensor(train_targets_scaled.values, dtype=torch.float32).to(device)
-    test_inputs = torch.tensor(test_inputs_scaled.values, dtype=torch.float32).to(device)
-    test_targets = torch.tensor(test_df[outputs].values, dtype=torch.float32).to(device)
+    # Convert to tensors
+    train_inputs = torch.tensor(train_inputs_scaled, dtype=torch.float32).to(device)
+    train_targets = torch.tensor(train_targets_scaled, dtype=torch.float32).to(device)
+    test_inputs = torch.tensor(test_inputs_scaled, dtype=torch.float32).to(device)
 
-    # Neural network training with multi-output
-    model_multi = SatNet(num_inputs=num_inputs).to(device)
-    opt_multi = torch.optim.Adam(model_multi.parameters(), lr)
-
+    # Train multi-output neural network
     print(f"{indent}Training multi-output neural network")
+    model_multi = SatNet(num_inputs=len(current_inputs), num_outputs=len(outputs)).to(device)
+    opt_multi = torch.optim.Adam(model_multi.parameters(), lr)
     for epoch in range(num_epochs):
-        print(f"{indent}  Epoch {epoch + 1}/{num_epochs}", end='')
-        train_model(model_multi, train_inputs, train_targets, opt_multi, single_output=False) #### NEW FUNCTION
+        print(f"{indent}  Epoch {epoch + 1}/{num_epochs}")
+        _, _, _, _ = train_model(model_multi, train_inputs, train_targets, opt_multi, outputs)
 
-    # Test the multi-output model
+    # Test multi-output neural network
     model_multi.eval()
     with torch.no_grad():
         nn3_preds = model_multi(test_inputs).cpu().numpy()
         nn3_preds = scaler_targets.inverse_transform(nn3_preds)
 
-    # Single-output neural networks
+    # Train single-output neural networks
     nn1_preds = {}
-    print(f"{indent}Training single-output neural networks")
-    for base in outputs:
-        model_single = SatNet(num_inputs=len(current_inputs), single_output=True).to(device)
+    for i, output in enumerate(outputs):
+        print(f"{indent}Training single-output neural network for {output}")
+        model_single = SatNet(num_inputs=len(current_inputs), num_outputs=1).to(device)
         opt_single = torch.optim.Adam(model_single.parameters(), lr)
-        print(f"{indent}  Training {base} neural network")
 
         for epoch in range(num_epochs):
-            print(f"{indent}    Epoch {epoch + 1}/{num_epochs}", end='')
-            target_index = outputs.index(base)
-            train_model(model_single, train_inputs, train_targets[:, target_index:target_index + 1], opt_single, single_output=True)
+            print(f"{indent}  Epoch {epoch + 1}/{num_epochs}")
+            _, _, _, _ = train_model(
+                model_single,
+                train_inputs,
+                train_targets[:, i:i + 1],
+                opt_single,
+                output
+            )
 
         model_single.eval()
         with torch.no_grad():
-            nn1_preds[base] = model_single(test_inputs).cpu().numpy()
+            nn1_preds[output] = model_single(test_inputs).cpu().numpy()
 
-    # Denormalize predictions for single-output models
-    nn1_preds_combine = np.column_stack([nn1_preds[base] for base in outputs])
-    nn1_preds_descale = scaler_targets.inverse_transform(nn1_preds_combine)
-    for idx, base in enumerate(outputs):
-        nn1_preds[base] = nn1_preds_descale[:, idx]
+    # Combine single-output predictions
+    nn1_preds_combined = np.column_stack([nn1_preds[output] for output in outputs])
+    nn1_preds_descale = scaler_targets.inverse_transform(nn1_preds_combined)
 
-    # Linear Regression as a baseline
+    # Linear Regression baseline
     print(f"{indent}Performing linear regression")
     lr_model = LinearRegression()
     lr_model.fit(train_df[current_inputs], train_df[outputs])
     lr_preds = lr_model.predict(test_df[current_inputs])
-    arvs = compute_arv(test_df[outputs].values, lr_preds)
-    for base, arv in zip(outputs, arvs):
-        print(f"| {base} ARV = {arv:.3f}", end='')
 
     # Compile results
-    model_types = ['nn3', 'nn1', 'lr']
-    results_dict = {
+    results = {
         'timestamp': test_df['datetime'].values,
     }
+    for i, output in enumerate(outputs):
+        results[f'{output}_actual'] = test_targets[:, i]
+        results[f'{output}_nn3'] = nn3_preds[:, i]
+        results[f'{output}_nn1'] = nn1_preds_descale[:, i]
+        results[f'{output}_lr'] = lr_preds[:, i]
 
-    for base in outputs:
-        results_dict[f'{base}_actual'] = test_targets[:, outputs.index(base)].cpu().numpy()
+    results_df = pd.DataFrame(results)
+    print(results_df)
 
-    for model in model_types:
-        for base in outputs:
-            if model == 'nn3':
-                results_dict[f'{base}_{model}'] = nn3_preds[:, outputs.index(base)].flatten()
-            elif model == 'nn1':
-                results_dict[f'{base}_{model}'] = nn1_preds[base].flatten()
-            elif model == 'lr':
-                results_dict[f'{base}_{model}'] = lr_preds[:, outputs.index(base)].flatten()
-
-    rep_results = pd.DataFrame(results_dict)
-    print(rep_results)
-
-    return rep_results
+    return results_df
 
 # Save results to file
 def save_results(results_dict, file_pattern, removed_input, results_directory, method="leave"):
