@@ -2,11 +2,9 @@ sat_data basic programs
 
 -----------------------------------------
 
-data.py downloads data files from the NASA repository, creates dataframes, and saves the dataframe as .pkl files
-    A new folder is created called "data" containing all of these files
+* data.py downloads data files from the NASA repository, creates DataFrames, and saves them in `.pkl` files in `./data`.
 
-data_plot.py creates plots from the .pkl files created by data.py
-    Dataframes are read and plotted for both magnetic field and position data in cartesian and polar coordinates vs. time
+* data_plot.py creates plots from the .pkl files created by data.py. Dataframes are read and plotted for both magnetic field and position data in cartesian and polar coordinates vs. time
 
 main.py runs neural network (both with 3 outputs and 1 output) and linear regression techniques to train and test on the .pkl files while removing one parameter in each iteration.
     Leave-one-out method is used, where a year of data is used as the test set and all remaining data is used as training, generating out-of-sample predictions. Repetitions with random sampling can be applied.
@@ -24,17 +22,19 @@ For all programs:
 
 Setup:
 
-cd /tmp
-cd .../satellite-predict
+```
+git clone https://github.com/dstrnad17/satellite-predict
 conda create -n python3.9.12-test python=3.9.12
 conda activate python3.9.12-test
-pip install -e
+pip install -e .
+```
 
 Program run order:
 
-setup.py
-data.py
+```
+python data.py # Downloads data
 data_plot.py (if desired)
 main.py
 main_table.py
 main_plot.py
+```
