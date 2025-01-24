@@ -90,11 +90,11 @@ y_test_pred_nl = nonlinear_model(x_test)
 nonlinear_test_loss = criterion(y_test_pred_nl, y_test).item()
 
 # Calculate ARV (Average Relative Variance)
-def compute_arv(y_true, y_pred):
-    mean_y = y_true.mean()
-    ss_total = ((y_true - mean_y) ** 2).sum()
-    ss_residual = ((y_true - y_pred) ** 2).sum()
-    return ss_residual / ss_total
+def compute_arv(predictions, targets):
+    residuals = targets - predictions
+    residual_variance = torch.var(residuals)
+    target_variance = torch.var(targets)
+    return (residual_variance / target_variance).item()
 
 linear_arv = compute_arv(y_test, y_test_pred_lin)
 nonlinear_arv = compute_arv(y_test, y_test_pred_nl)

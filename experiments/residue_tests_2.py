@@ -5,19 +5,22 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
+def arv(targets, predictions):
+    residuals = targets - predictions
+    residual_variance = torch.var(residuals)
+    target_variance = torch.var(targets)
+    return (residual_variance / target_variance).item()
+
 # Generate noisy multi-input data
 np.random.seed(42)
 m1, m2 = 2, -1
-b = 5
+#b = 5
 X1 = np.linspace(-1, 1, 200)
-X2 = np.linspace(-1, 1, 200)
-# y = m1 * X1 + m2 * X2 + b + noise
-y = m1 * X1 + m2 * X2 + b + np.random.normal(0, 0.5, 200)
-X = np.column_stack((X1, X2))
+X2 = X1 + np.random.normal(0, 0.2, 200)
 
-#y = np.tanh(2*(M)X) + np.random.normal(0, .2, 200)
-#Arbitray numner of slopes, combine codes
-#Add annotations to plot
+#y = m1 * X1 + m2 * X2 + b + np.random.normal(0, 0.5, 200)
+X = np.column_stack((X1, X2))
+y = np.tanh(2 * (m1 * X1 + m2 * X2)) + np.random.normal(0, 0.2, 200)
 
 # Split data into training and testing sets
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -91,25 +94,40 @@ with torch.no_grad():
     residual_pred_test = residual_net(X_test)
     y_pred_final = y_pred_lin_test + residual_pred_test
 
-# Plot results
-plt.scatter(X_test[:, 0].numpy(), y_test.numpy(), label='True Data', color='blue')
-plt.scatter(X_test[:, 0].numpy(), y_pred_lin_test.detach().numpy(), label='Linear Prediction', color='red')
-plt.scatter(X_test[:, 0].numpy(), y_pred_final.detach().numpy(), label='Final Prediction (w/ Residuals)', color='green')
-plt.legend()
-plt.show()
-
 # Calculate the MSE for the final prediction
 init_mse = nn.MSELoss()(y_pred_lin_test, y_test)
 final_mse = nn.MSELoss()(y_pred_final, y_test)
-print(f'Initial MSE: {init_mse.item()}')
-print(f'Final MSE: {final_mse.item()}')
+print(f'Linear MSE: {init_mse.item()}')
+print(f'ResidualNet MSE: {final_mse.item()}')
 
-def relative_variance(predictions, actual):
-    mean_actual = actual.mean().item()
-    variance_pred = predictions.var().item()
-    return variance_pred / (mean_actual ** 2)
+init_arv = arv(y_pred_lin_test, y_test)
+final_arv = arv(y_pred_final, y_test)
+print(f'Linear ARV: {init_arv}')
+print(f'ResidualNet ARV: {final_arv}')
 
-init_rel_variance = relative_variance(y_pred_lin_test, y_test)
-final_rel_variance = relative_variance(y_pred_final, y_test)
-print(f'Initial ARV: {init_rel_variance}')
-print(f'Final ARV: {final_rel_variance}')
+# Plot results with ARV annotations
+plt.figure(figsize=(10, 8))
+
+plt.subplot(2, 1, 1)
+plt.scatter(X_test[:, 0].numpy(), y_test.numpy(), label='True Data', color='blue', alpha=0.6)
+plt.scatter(X_test[:, 0].numpy(), y_pred_lin_test.detach().numpy(), label=f'Linear Prediction, ARV: {init_arv:.4f}', color='red', alpha=0.6)
+plt.scatter(X_test[:, 0].numpy(), y_pred_final.detach().numpy(), label=f'ResidualNet Prediction, ARV: {final_arv:.4f}', color='green', alpha=0.6)
+
+# Add labels and legend
+plt.xlabel('X1')
+plt.ylabel('y')
+plt.title('Model Predictions')
+plt.legend()
+plt.grid(alpha=0.3)
+
+plt.subplot(2, 1, 2)
+plt.scatter(X_test[:, 1].numpy(), y_test.numpy(), label='True Data', color='blue', alpha=0.6)
+plt.scatter(X_test[:, 1].numpy(), y_pred_lin_test.detach().numpy(), label='Linear Prediction', color='red', alpha=0.6)
+plt.scatter(X_test[:, 1].numpy(), y_pred_final.detach().numpy(), label='ResidualNet Prediction', color='green', alpha=0.6)
+
+# Add labels and legend
+plt.xlabel('X2')
+plt.ylabel('y')
+plt.grid(alpha=0.3)
+
+plt.show()

@@ -233,10 +233,10 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
     if 'nn3' in models:
       # TODO: This need to be generalized to be named mimo
       # Multi-output neural network
+      print(f"\n{indent}Training multi-output neural network")
       model_multi = SatNet(num_inputs, num_outputs=len(outputs)).to(device)
       opt_multi = torch.optim.Adam(model_multi.parameters(), lr)
 
-      print(f"\n{indent}Training multi-output neural network")
       for epoch in range(num_epochs):
         print(f"{indent}  Epoch {epoch + 1}/{num_epochs}")
         _, _, _, epoch_arvs = train_model(model_multi, train_inputs, train_targets,
@@ -246,9 +246,10 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
       model_multi.eval()
       with torch.no_grad():
         nn3_preds = model_multi(test_inputs).cpu().numpy()  # Multi-output NN predictions
-        # Denormalize predictions
-        nn3_preds = scaler_targets.inverse_transform(nn3_preds)
-        results['nn3']['predicted'][outputs] = nn3_preds
+      
+      # Denormalize predictions
+      nn3_preds = scaler_targets.inverse_transform(nn3_preds)
+      results['nn3']['predicted'][outputs] = nn3_preds
 
     if 'nn1' in models:
       # TODO: Rename to miso
@@ -264,11 +265,7 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
             print(f"{indent}  Epoch {epoch + 1}/{num_epochs}")
             _, _, _, epoch_arvs = train_model(model_single, train_inputs, train_targets[:, i:i + 1],
                                      opt_single, output, device, batch_size)
-            results['nn3']['epochs'].append(epoch_arvs)
-
-        model_single.eval()
-        with torch.no_grad():
-            nn1_preds[output] = model_single(test_inputs).cpu().numpy()
+            results['nn1']['epochs'].append(epoch_arvs)
 
         model_single.eval()
         with torch.no_grad():
