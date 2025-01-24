@@ -82,18 +82,18 @@ names = pd.DataFrame(pd.read_csv(mypath + files[0], nrows=0, delimiter=',')).col
 for i, file in enumerate(files):
     file = mypath + file
     xprint(f"  Processing file {i+1}/{len(files)}: {file}")
-    
+
     # Read the data, skip first row, whitespace as delimiter
     data = pd.read_csv(file, skiprows=1, header=None, delimiter=r'\s+')
-    
+
     # Convert to DataFrame, assign column names
     df = pd.DataFrame(data)
     df.columns = names
-    
+
     # Save DataFrame as pickle file
     pkl_filename = file.replace(".dat", ".pkl")
     df.to_pickle(join(mypath, pkl_filename))
-    
+
     xprint(f"  Saved DataFrame to {pkl_filename}")
 
 xprint("All files pickled and saved")
