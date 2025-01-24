@@ -1,0 +1,22 @@
+y = mx + b
+
+y = W*act(w*x) + b
+
+initialize nn with
+
+w = m/100
+W = 100
+y = 100*tanh(m*x/100) + b
+
+If m*x/100 is small
+y = 100*(m*x/100) + b
+y = m*x + b
+
+And another regime:
+
+delta = y - y_pred_lin (from linear regression)
+y_pred_sum = y_pred_lin + delta
+
+error = y_pred_sum - y
+error = y_pred_lin + delta - y
+error = -delta + delta = 0

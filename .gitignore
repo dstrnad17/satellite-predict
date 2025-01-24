@@ -1,0 +1,7 @@
+*.egg-info/
+.DS_Store
+results/
+data_plot/
+data/
+__pycache__/
+*~
