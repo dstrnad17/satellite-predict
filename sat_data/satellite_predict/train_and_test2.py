@@ -156,9 +156,12 @@ def train_model(model, train_inputs, train_targets, opt, outputs, device, batch_
     # Compute and print ARV/loss
     epoch_arvs = arv(all_targets, all_predictions)
 
-    for output, _arv in zip(outputs, epoch_arvs):
-        print(f" | {output} ARV = {_arv:.3f}", end='')
-    print(f" loss = {total_loss:.4f}")
+    if not isinstance(outputs, list):
+        print(f" | {outputs} ARV = {epoch_arvs:.3f} | loss = {total_loss:.4f}", end='')
+    else:
+        for output, _arv in zip(outputs, epoch_arvs):
+            print(f" | {output} ARV = {_arv:.3f}", end='')
+        print(f" | loss = {total_loss:.4f}")
 
     return total_loss, all_predictions, all_targets, epoch_arvs
 
@@ -205,11 +208,11 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
     train_inputs = torch.tensor(train_inputs_scaled.values, dtype=torch.float32).to(device)
     train_targets = torch.tensor(train_targets_scaled.values, dtype=torch.float32).to(device)
     test_inputs = torch.tensor(test_inputs_scaled.values, dtype=torch.float32).to(device)
-    test_targets = torch.tensor(test_df[outputs].values, dtype=torch.float32).to(device)
+    test_targets = test_df[outputs].values
 
     results = {'actual': {'timestamp': test_df['datetime'].values}}
     for output in outputs:
-      results['actual'][output] = test_targets[:, outputs.index(output)].cpu().numpy()
+      results['actual'][output] = test_targets[:, outputs.index(output)]
     results['actual'] = pd.DataFrame(results['actual'])
 
     for model in kwargs['models']:
@@ -257,12 +260,12 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
       print(f"\n{indent}Training single-output neural networks w/ input '{removed_input}' removed")
       nn1_preds = {}
       for i, output in enumerate(outputs):
-        print(f"{indent}Training single-output neural network for {output}")
+        print(f"\n{indent}Training single-output neural network for {output}")
         model_single = SatNet(num_inputs, num_outputs=1).to(device)
         opt_single = torch.optim.Adam(model_single.parameters(), lr)
 
         for epoch in range(num_epochs):
-            print(f"{indent}  Epoch {epoch + 1}/{num_epochs}")
+            print(f"\n{indent}  Epoch {epoch + 1}/{num_epochs}")
             _, _, _, epoch_arvs = train_model(model_single, train_inputs, train_targets[:, i:i + 1],
                                      opt_single, output, device, batch_size)
             results['nn1']['epochs'].append(epoch_arvs)
@@ -270,11 +273,11 @@ def process_single_rep(train_df, test_df, removed_input=None, **kwargs):
         model_single.eval()
         with torch.no_grad():
           nn1_preds[output] = model_single(test_inputs).cpu().numpy()
+      nn1_preds_combine = np.column_stack([nn1_preds[output] for output in outputs]) # Combine individual results
 
       # Denormalize predictions
-      nn1_preds_combine = np.column_stack([nn1_preds[output] for output in outputs])
       nn1_preds = scaler_targets.inverse_transform(nn1_preds_combine)
-      results['nn1'][outputs] = nn1_preds
+      results['nn1']['predicted'][outputs] = nn1_preds
 
     return results
 

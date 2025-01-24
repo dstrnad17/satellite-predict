@@ -15,7 +15,7 @@ def arv(targets, predictions):
 np.random.seed(42)
 num_features = 3  # Number of inputs (slopes)
 slopes = np.random.uniform(-2, 2, num_features)  # Random slopes
-X1 = np.linspace(-1, 1, 200) # No noise
+X1 = np.linspace(-1, 1, 200) # First feature has no noise
 X = np.column_stack([X1] + [np.linspace(-1, 1, 200) + np.random.normal(0, 0.2, 200) for _ in range(1, num_features)])
 y = np.tanh(X @ slopes) + np.random.normal(0, 0.2, 200)  # Non-linear target with noise
 
@@ -28,7 +28,7 @@ y_train = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
 X_test = torch.tensor(X_test, dtype=torch.float32)
 y_test = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
 
-# Generalized Linear Regression Model
+# Linear Regression Model
 class LinearRegressionModel(nn.Module):
     def __init__(self, input_dim):
         super(LinearRegressionModel, self).__init__()
@@ -49,7 +49,7 @@ for epoch in range(1000):
     loss.backward()
     lin_optimizer.step()
 
-# Generalized Residual Network
+# Residual Network
 class ResidualNet(nn.Module):
     def __init__(self, input_dim):
         super(ResidualNet, self).__init__()
@@ -84,21 +84,21 @@ with torch.no_grad():
     y_pred_final = y_pred_lin_test + residual_pred_test
 
 # Metrics
-init_mse = lin_criterion(y_pred_lin_test, y_test).item()
-final_mse = lin_criterion(y_pred_final, y_test).item()
-init_arv = arv(y_test, y_pred_lin_test)
-final_arv = arv(y_test, y_pred_final)
+lin_mse = lin_criterion(y_pred_lin_test, y_test).item()
+residual_mse = lin_criterion(y_pred_final, y_test).item()
+lin_arv = arv(y_test, y_pred_lin_test)
+residual_arv = arv(y_test, y_pred_final)
 
 # Display metrics
-print(f"Linear MSE: {init_mse:.4f}, ResidualNet MSE: {final_mse:.4f}")
-print(f"Linear ARV: {init_arv:.4f}, ResidualNet ARV: {final_arv:.4f}")
+print(f"Linear MSE: {lin_mse:.4f}, ResidualNet MSE: {residual_mse:.4f}")
+print(f"Linear ARV: {lin_arv:.4f}, ResidualNet ARV: {residual_arv:.4f}")
 
 # Plot results
-fig, axs = plt.subplots(num_features, 1, figsize=(10, 4 * num_features))
+fig, axs = plt.subplots(num_features, 1, figsize=(10, 3 * num_features))
 for i in range(num_features):
     axs[i].scatter(X_test[:, i].numpy(), y_test.numpy(), label='True Data', color = 'blue', alpha=0.6)
-    axs[i].scatter(X_test[:, i].numpy(), y_pred_lin_test.numpy(), label=f'Linear Prediction (ARV: {init_arv:.4f})', color = 'red', alpha=0.6)
-    axs[i].scatter(X_test[:, i].numpy(), y_pred_final.numpy(), label=f'ResidualNet Prediction (ARV: {final_arv:.4f})', color = 'green', alpha=0.6)
+    axs[i].scatter(X_test[:, i].numpy(), y_pred_lin_test.numpy(), label=f'Linear Prediction (ARV: {lin_arv:.4f})', color = 'red', alpha=0.6)
+    axs[i].scatter(X_test[:, i].numpy(), y_pred_final.numpy(), label=f'ResidualNet Prediction (ARV: {residual_arv:.4f})', color = 'green', alpha=0.6)
     axs[i].set_xlabel(f'X{i + 1}')
     axs[i].set_ylabel('y')
     axs[i].grid(alpha=0.3)

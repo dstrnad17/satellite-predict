@@ -23,7 +23,7 @@ conf = {
     # True => [None, **outputs]; None or no attribute => # Only use all inputs
     "removed_inputs": True, 
 
-    "models": ["ols", "nn3"],
+    "models": ["ols", "nn3", "nn1"],
 
     "inputs": ["r", "theta", "phi", "imfby", "imfbz", "vsw", "nsw", "ey", "ey_avg"],
     "outputs": ["bx", "by", "bz"],
@@ -53,7 +53,7 @@ satellites = [
 if test_run:
   satellites = satellites[0:2]
   conf['data']['n_df'] = 2
-  conf['num_epochs'] = 5
+  conf['num_epochs'] = 3
   conf['num_boot_reps'] = 1
   conf['removed_inputs'] = [None, "r"]
 
