@@ -43,7 +43,7 @@ def summary(tag, results_dir=None):
       file_path = os.path.join(loo_dir, file_name)
 
       # pkl file contains a list of bootstrap results, each in the form of a dict
-      # [{actual: df, nn1: df, nn3: df, lr: df}, ...]
+      # [{actual: df, ols: df, nn_miso: df, nn_mimo: df}, ...]
       # where df is a DataFrame with columns for each output
       print(f"      Reading: {file_path}")
       boots = pd.read_pickle(file_path) # Array of bootstrap results
